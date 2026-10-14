@@ -6,14 +6,16 @@ import { MODEL_POLICY_CACHE_KEY, parseModelPolicyDocument, refreshModelPolicyFro
 import { createCostContext } from '../src/cost-context.js';
 import { estimateRecord, priceKey } from '../src/cost-model.js';
 
+// Test dates move with the bundled catalog so freshness checks remain meaningful.
+const pricingDate = days => new Date(Date.parse(BUNDLED_MODEL_POLICY.pricing.updatedAt) + days * 86_400_000).toISOString().slice(0, 10);
 const key = { source: 'vertexai', model: 'gemini-test', tier: 'standard' };
 const entry = { ...key, input: 2, cachedInput: 0.2, output: 12, sourceUrl: 'https://cloud.google.com/vertex-ai/generative-ai/pricing' };
 function catalog(overrides = {}) {
-    return { updatedAt: '2026-09-23', currency: 'USD', unit: 'per_million_tokens', entries: [entry], ...overrides };
+    return { updatedAt: pricingDate(1), currency: 'USD', unit: 'per_million_tokens', entries: [entry], ...overrides };
 }
 function policy(pricing = catalog()) { return { ...BUNDLED_MODEL_POLICY, pricing }; }
 const logger = { warn() {} };
-const now = Date.parse('2026-09-23T12:00:00Z');
+const now = Math.max(...[BUNDLED_MODEL_POLICY.updatedAt, BUNDLED_MODEL_POLICY.aiStudio.updatedAt, pricingDate(1)].map(date => Date.parse(date))) + 12 * 60 * 60 * 1_000;
 function storage() {
     let text = JSON.stringify(BUNDLED_MODEL_POLICY);
     return { getItem: () => text, setItem: (_key, value) => { text = value; } };
@@ -27,7 +29,7 @@ test('price-only update is installed with policy and survives cache restoration 
     const cache = storage();
     const result = await refresh(policy(), cache);
     assert.equal(result.changed, true);
-    assert.equal(result.pricingSnapshot, '2026-09-23');
+    assert.equal(result.pricingSnapshot, pricingDate(1));
     assert.deepEqual(getActiveModelPolicy().pricing, catalog());
     const legacy = { ...BUNDLED_MODEL_POLICY };
     delete legacy.pricing;
@@ -45,13 +47,13 @@ test('invalid pricing rejects the entire support update without modifying active
         catalog({ entries: [{ ...entry, input: '2' }] }), catalog({ entries: [{ ...entry, cachedInput: -1 }] }),
         catalog({ entries: [{ ...entry, longInput: 1 }] }), catalog({ entries: [{ ...entry, source: 'openai' }] }),
         catalog({ entries: [{ ...entry, model: 'Gemini-Test' }] }), catalog({ entries: [{ ...entry, tier: 'batch' }] }),
-        catalog({ entries: [{ ...entry, validUntil: '2026-09-22' }] }),
+        catalog({ entries: [{ ...entry, validUntil: pricingDate(0) }] }),
         catalog({ entries: [{ ...entry, sourceUrl: 'javascript:alert(1)' }] }),
         catalog({ entries: [entry, entry] }), catalog({ entries: Array(257).fill(entry) }),
-        catalog({ updatedAt: '2026-09-21' }), catalog({ updatedAt: '2027-01-01' })];
+        catalog({ updatedAt: pricingDate(-1) }), catalog({ updatedAt: pricingDate(30) })];
     for (const pricing of invalid) {
         const document = policy(pricing);
-        document.updatedAt = '2026-09-23';
+        document.updatedAt = pricingDate(1);
         const result = await refresh(document, cache);
         assert.equal(result.applied, false, JSON.stringify(pricing));
         assert.deepEqual(getActiveModelPolicy(), BUNDLED_MODEL_POLICY);
@@ -89,9 +91,9 @@ test('manual overrides stay independent from automatic catalog and request snaps
     assert.equal(captured.input, 2);
     const record = { status: 'complete', price: captured, usage: { promptTokenCount: 1_000_000, candidatesTokenCount: 0 } };
     assert.equal(estimateRecord(record, api.getPrices()[priceKey(key)]).amount, 2);
-    prices = catalog({ entries: [{ ...entry, validUntil: '2026-09-23' }] });
+    prices = catalog({ entries: [{ ...entry, validUntil: pricingDate(1) }] });
     assert.equal(api.getUsagePrice(data, key).input, 2);
-    date = Date.parse('2026-09-24T00:00:00Z');
+    date = Date.parse(pricingDate(2));
     assert.equal(api.getUsagePrice(data, key), null);
     assert.equal(api.getPriceInfo(key).source, 'missing');
     api.setPrice(key, { input: 0, cachedInput: 0, output: 0 });

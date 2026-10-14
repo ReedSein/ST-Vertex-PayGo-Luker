@@ -2,6 +2,8 @@
 
 只安装 **ST-Vertex-PayGo 前端 + ST-Vertex-PayGo-Server 后端**。支持 Windows PowerShell、macOS、Linux、WSL 和 Android Termux 上已经能正常运行的 SillyTavern ≥ 1.16.0 / Luker ≥ 2.7.0。**不支持 TauriTavern，不包含其他插件。**
 
+当前发布版本为 **v0.5.0**（沿用预发布渠道）。SillyTavern / Luker 的前端与后端须一并更新至 **v0.5.0**，安装或更新完成后重启宿主并刷新页面。本版已包含 Google OpenAI 兼容桥接，无需选择开发分支。桥接首次使用时默认关闭；旧版内存状态不能迁移，升级后首次手动启用才开始保存并在重启时自动恢复。
+
 默认宿主环境已配置完成：Node.js ≥ 20、Git 可用，宿主依赖已安装。安装器复用宿主的 `yaml` 解析器，不运行 npm、不安装或升级系统依赖、不下载酒馆本体。Google 账号仍在宿主界面配置。
 
 ## 一条命令在线安装

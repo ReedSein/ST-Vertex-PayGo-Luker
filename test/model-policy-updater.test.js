@@ -16,15 +16,23 @@ import {
     MODEL_POLICY_GITHUB_URL,
     MODEL_POLICY_REFRESH_INTERVAL_MS,
     parseModelPolicyDocument,
-    refreshModelPolicyFromGitHub,
+    refreshModelPolicyFromGitHub as refreshPolicy,
     restoreBundledModelPolicy,
-    restoreCachedModelPolicy,
+    restoreCachedModelPolicy as restoreCache,
 } from '../src/model-policy-updater.js';
 import { AI_STUDIO_SOURCE, TIER } from '../src/constants.js';
 import { planPersistedReconciliation } from '../src/reconciliation.js';
 import { createRequestHook } from '../src/request-hook.js';
 
 const silentLogger = { warn() {} };
+// Keep update/staleness scenarios relative to the shipped snapshots.
+const shiftDate = (date, days) => new Date(Date.parse(date) + days * 86_400_000).toISOString().slice(0, 10);
+const vertexDate = days => shiftDate(BUNDLED_MODEL_POLICY.updatedAt, days);
+const aiStudioDate = days => shiftDate(BUNDLED_MODEL_POLICY.aiStudio.updatedAt, days);
+const testNow = Math.max(...[BUNDLED_MODEL_POLICY.updatedAt, BUNDLED_MODEL_POLICY.aiStudio.updatedAt,
+    BUNDLED_MODEL_POLICY.pricing.updatedAt].map(date => Date.parse(date))) + 3 * 86_400_000;
+const refreshModelPolicyFromGitHub = options => refreshPolicy({ now: testNow, ...options });
+const restoreCachedModelPolicy = options => restoreCache({ now: testNow, ...options });
 
 function createStorage(initialValue = null) {
     const values = new Map();
@@ -45,7 +53,7 @@ function responseFor(document) {
 }
 
 function currentBasedPolicy({
-    updatedAt = '2026-09-04',
+    updatedAt = vertexDate(1),
     flexAdditions = [],
     priorityAdditions = [],
     knownAdditions = [...flexAdditions, ...priorityAdditions],
@@ -68,7 +76,7 @@ function aiStudioPolicy(overrides = {}) {
         ...BUNDLED_MODEL_POLICY,
         aiStudio: {
             ...BUNDLED_MODEL_POLICY.aiStudio,
-            updatedAt: '2026-09-11',
+            updatedAt: aiStudioDate(1),
             ...overrides,
         },
     };
@@ -136,7 +144,7 @@ test('a valid GitHub response replaces policy atomically and becomes the last-kn
 
     assert.deepEqual(
         { applied: result.applied, changed: result.changed, source: result.source, snapshot: result.snapshot },
-        { applied: true, changed: true, source: 'github', snapshot: '2026-09-04' },
+        { applied: true, changed: true, source: 'github', snapshot: vertexDate(1) },
     );
     assert.equal(getTierSupport(model, TIER.PRIORITY).level, 'known');
     assert.equal(getTierSupport(model, TIER.FLEX).level, 'unsupported');
@@ -176,12 +184,12 @@ test('a valid cache is restored before a failed GitHub refresh and remains activ
     assert.equal(restored.applied, true);
     assert.equal(restored.changed, true);
     assert.equal(refreshed.applied, false);
-    assert.equal(MODEL_POLICY_SNAPSHOT, '2026-09-04');
+    assert.equal(MODEL_POLICY_SNAPSHOT, vertexDate(1));
     assert.equal(getTierSupport(model, TIER.FLEX).level, 'known');
 });
 
 test('stale or invalid cache entries never replace the bundled policy', () => {
-    const stale = currentBasedPolicy({ updatedAt: '2026-09-02' });
+    const stale = currentBasedPolicy({ updatedAt: vertexDate(-1) });
     const staleResult = restoreCachedModelPolicy({
         storage: createStorage(JSON.stringify(stale)),
         logger: silentLogger,
@@ -200,13 +208,13 @@ test('stale or invalid cache entries never replace the bundled policy', () => {
 
 test('a poisoned future cache is rejected and cannot pin later GitHub updates', async () => {
     const storage = createStorage(JSON.stringify(currentBasedPolicy({ updatedAt: '9999-12-31' })));
-    const now = Date.UTC(2026, 8, 22, 12);
+    const now = testNow;
 
     const restored = restoreCachedModelPolicy({ storage, logger: silentLogger, now });
     assert.equal(restored.applied, false);
     assert.equal(restored.error.code, 'FUTURE_POLICY');
 
-    const valid = currentBasedPolicy({ updatedAt: '2026-09-04' });
+    const valid = currentBasedPolicy({ updatedAt: vertexDate(1) });
     const refreshed = await refreshModelPolicyFromGitHub({
         fetchImpl: async () => responseFor(valid),
         storage,
@@ -214,7 +222,7 @@ test('a poisoned future cache is rejected and cannot pin later GitHub updates', 
         now,
     });
     assert.equal(refreshed.applied, true);
-    assert.equal(MODEL_POLICY_SNAPSHOT, '2026-09-04');
+    assert.equal(MODEL_POLICY_SNAPSHOT, vertexDate(1));
 });
 
 test('known-model tombstones cannot be removed by a newer GitHub document', async () => {
@@ -229,7 +237,7 @@ test('known-model tombstones cannot be removed by a newer GitHub document', asyn
     assert.equal(first.applied, true);
     assert.equal(getTierSupport(retiredModel, TIER.FLEX).level, 'unsupported');
 
-    const incompletePolicy = currentBasedPolicy({ updatedAt: '2026-09-05' });
+    const incompletePolicy = currentBasedPolicy({ updatedAt: vertexDate(2) });
     const second = await refreshModelPolicyFromGitHub({
         fetchImpl: async () => responseFor(incompletePolicy),
         storage,
@@ -238,13 +246,13 @@ test('known-model tombstones cannot be removed by a newer GitHub document', asyn
 
     assert.equal(second.applied, false);
     assert.equal(second.error.code, 'INCOMPLETE_MODEL_HISTORY');
-    assert.equal(MODEL_POLICY_SNAPSHOT, '2026-09-04');
+    assert.equal(MODEL_POLICY_SNAPSHOT, vertexDate(1));
     assert.equal(getTierSupport(retiredModel, TIER.PRIORITY).level, 'unsupported');
     assert.deepEqual(JSON.parse(storage.value(MODEL_POLICY_CACHE_KEY)), parseModelPolicyDocument(firstPolicy));
 });
 
 test('invalid GitHub data and cache write failures preserve a safe in-memory policy', async () => {
-    const invalid = currentBasedPolicy({ updatedAt: '2026-09-05' });
+    const invalid = currentBasedPolicy({ updatedAt: vertexDate(2) });
     invalid.knownModels = invalid.knownModels.slice(1);
     const invalidResult = await refreshModelPolicyFromGitHub({
         fetchImpl: async () => responseFor(invalid),
@@ -342,7 +350,7 @@ test('AI Studio-only changes use the existing fetch, cache, and change notificat
     assert.equal(result.changed, true);
     assert.equal(MODEL_POLICY_SNAPSHOT, BUNDLED_MODEL_POLICY.updatedAt);
     assert.equal(getTierSupport(model, TIER.FLEX, AI_STUDIO_SOURCE).level, 'known');
-    assert.equal(getTierSupport(model, TIER.FLEX, AI_STUDIO_SOURCE).snapshot, '2026-09-11');
+    assert.equal(getTierSupport(model, TIER.FLEX, AI_STUDIO_SOURCE).snapshot, aiStudioDate(1));
     assert.equal(getTierSupport(model, TIER.FLEX).level, 'unverified');
     assert.deepEqual(getActiveModelPolicy().tiers, BUNDLED_MODEL_POLICY.tiers);
     assert.deepEqual(JSON.parse(storage.value(MODEL_POLICY_CACHE_KEY)), parseModelPolicyDocument(document));
@@ -430,7 +438,7 @@ test('legacy Vertex-only responses retain and cache a previously fetched AI Stud
 
     restoreBundledModelPolicy();
     assert.equal(restoreCachedModelPolicy({ storage, logger: silentLogger }).applied, true);
-    assert.equal(getTierSupport(model, TIER.FLEX, AI_STUDIO_SOURCE).snapshot, '2026-09-11');
+    assert.equal(getTierSupport(model, TIER.FLEX, AI_STUDIO_SOURCE).snapshot, aiStudioDate(1));
     const unchanged = await refreshModelPolicyFromGitHub({ fetchImpl: async () => responseFor(legacy), storage, logger: silentLogger });
     assert.equal(unchanged.changed, false);
     assert.equal(getTierSupport(model, TIER.FLEX, AI_STUDIO_SOURCE).level, 'known');
@@ -479,9 +487,9 @@ test('AI Studio dates and model history are checked independently for both cache
     const storage = createStorage();
     await refreshModelPolicyFromGitHub({ fetchImpl: async () => responseFor(updated), storage, logger: silentLogger });
     for (const [aiStudio, code] of [
-        [{ ...updated.aiStudio, updatedAt: '2026-09-09' }, 'STALE_POLICY'],
+        [{ ...updated.aiStudio, updatedAt: aiStudioDate(-1) }, 'STALE_POLICY'],
         [{ ...updated.aiStudio, updatedAt: '9999-12-31' }, 'FUTURE_POLICY'],
-        [{ ...BUNDLED_MODEL_POLICY.aiStudio, updatedAt: '2026-09-12' }, 'INCOMPLETE_MODEL_HISTORY'],
+        [{ ...BUNDLED_MODEL_POLICY.aiStudio, updatedAt: aiStudioDate(2) }, 'INCOMPLETE_MODEL_HISTORY'],
     ]) {
         const document = { ...currentBasedPolicy(), aiStudio };
         const cached = restoreCachedModelPolicy({ storage: createStorage(JSON.stringify(document)), logger: silentLogger });

@@ -12,6 +12,8 @@ import {
     EXTENSION_ID,
     LOG_TIMEOUT_MS,
     MAX_LOG_RESPONSE_BYTES,
+    MAX_BRIDGE_LOG_RESPONSE_BYTES,
+    BRIDGE_LOG_TIMEOUT_MS,
     PREPARE_TIMEOUT_MS,
     PROTOCOL_VERSION,
     REQUIRED_TRANSPORT,
@@ -69,6 +71,7 @@ async function fetchJson(fetchImpl, url, options, timeoutMs) {
         try {
             data = await response.json();
         } catch (cause) {
+            if (cause?.name === 'AbortError') throw cause;
             throw new ServerPluginError('Server Plugin returned a non-JSON response.', {
                 code: 'INVALID_RESPONSE',
                 status: response.status,
@@ -94,14 +97,18 @@ async function fetchJson(fetchImpl, url, options, timeoutMs) {
     }
 }
 
-async function fetchText(fetchImpl, url, options, timeoutMs) {
+async function fetchText(fetchImpl, url, options, timeoutMs, {
+    maxBytes = MAX_LOG_RESPONSE_BYTES,
+    contentTypePattern = /^text\/plain(?:\s*;|$)/iu,
+} = {}) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
         const response = await fetchImpl(url, { ...options, signal: controller.signal });
         const contentLength = Number(response.headers?.get?.('content-length'));
-        if (Number.isFinite(contentLength) && contentLength > MAX_LOG_RESPONSE_BYTES) {
+        if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+            controller.abort();
             throw new ServerPluginError('Server Plugin log response is too large.', {
                 code: 'LOG_TOO_LARGE',
                 status: response.status,
@@ -119,7 +126,7 @@ async function fetchText(fetchImpl, url, options, timeoutMs) {
                     const { done, value } = await reader.read();
                     if (done) break;
                     totalBytes += value.byteLength;
-                    if (totalBytes > MAX_LOG_RESPONSE_BYTES) {
+                    if (totalBytes > maxBytes) {
                         await reader.cancel();
                         throw new ServerPluginError('Server Plugin log response is too large.', {
                             code: 'LOG_TOO_LARGE',
@@ -134,7 +141,7 @@ async function fetchText(fetchImpl, url, options, timeoutMs) {
                 const byteLength = typeof TextEncoder === 'function'
                     ? new TextEncoder().encode(data).byteLength
                     : data.length;
-                if (byteLength > MAX_LOG_RESPONSE_BYTES) {
+                if (byteLength > maxBytes) {
                     throw new ServerPluginError('Server Plugin log response is too large.', {
                         code: 'LOG_TOO_LARGE',
                         status: response.status,
@@ -142,6 +149,7 @@ async function fetchText(fetchImpl, url, options, timeoutMs) {
                 }
             }
         } catch (cause) {
+            if (cause?.name === 'AbortError') throw cause;
             if (cause instanceof ServerPluginError) throw cause;
             throw new ServerPluginError('Server Plugin returned an invalid text response.', {
                 code: 'INVALID_LOG_RESPONSE',
@@ -160,7 +168,7 @@ async function fetchText(fetchImpl, url, options, timeoutMs) {
             throw new ServerPluginError(message, { code: 'HTTP_ERROR', status: response.status });
         }
         const contentType = response.headers?.get?.('content-type');
-        if (contentType && !/^text\/plain(?:\s*;|$)/iu.test(contentType)) {
+        if (contentType && !contentTypePattern.test(contentType)) {
             throw new ServerPluginError('Server Plugin returned an invalid log content type.', {
                 code: 'INVALID_LOG_RESPONSE',
                 status: response.status,
@@ -224,7 +232,74 @@ export function createServerClient({ fetchImpl = globalThis.fetch, getRequestHea
         throw new TypeError('A fetch implementation is required.');
     }
 
+    async function fetchBridgeLogs(url, method) {
+        const text = await fetchText(fetchImpl, url, {
+            method, headers: { ...getRequestHeaders(), Accept: 'application/json',
+                ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}) },
+            ...(method === 'POST' ? { body: '{}' } : {}), cache: 'no-store',
+        }, BRIDGE_LOG_TIMEOUT_MS, { maxBytes: MAX_BRIDGE_LOG_RESPONSE_BYTES,
+            contentTypePattern: /^application\/json(?:\s*;|$)/iu });
+        let data;
+        try { data = JSON.parse(text); } catch (cause) {
+            throw new ServerPluginError('Invalid bridge API log response.', { code: 'INVALID_BRIDGE_LOG_RESPONSE', cause });
+        }
+        if (data?.ok !== true || !Array.isArray(data.entries)
+            || data.entries.some(entry => !entry || typeof entry !== 'object' || Array.isArray(entry))
+            || (method === 'POST' && data.entries.length !== 0)) {
+            throw new ServerPluginError('Invalid bridge API log response.', { code: 'INVALID_BRIDGE_LOG_RESPONSE' });
+        }
+        return data;
+    }
+
     return {
+        async readActiveGoogleSecretId(source) {
+            const secretKey = source === 'makersuite' ? 'api_key_makersuite'
+                : source === 'vertexai' ? 'vertexai_service_account_json' : null;
+            if (!secretKey) throw new TypeError('A Google source is required.');
+            const data = await fetchJson(fetchImpl, '/api/secrets/read', {
+                method: 'POST',
+                headers: { ...getRequestHeaders(), Accept: 'application/json', 'Content-Type': 'application/json' },
+                body: '{}',
+                cache: 'no-store',
+            }, HEALTH_TIMEOUT_MS);
+            const entries = data?.[secretKey];
+            if (entries === true) return null; // Legacy host: server snapshots the active credential.
+            if (!Array.isArray(entries)) {
+                throw new ServerPluginError('No active Google credential is available.', { code: 'ACTIVE_GOOGLE_SECRET_UNAVAILABLE' });
+            }
+            const active = entries.filter(entry => entry?.active === true);
+            if (active.length !== 1 || typeof active[0].id !== 'string'
+                || !/^[A-Za-z0-9_-]{1,128}$/u.test(active[0].id)) {
+                throw new ServerPluginError('No valid active Google credential is available.', { code: 'ACTIVE_GOOGLE_SECRET_UNAVAILABLE' });
+            }
+            return active[0].id;
+        },
+
+        async readOpenAiBridge() {
+            return await fetchJson(fetchImpl, SERVER_ROUTES.OPENAI_BRIDGE, {
+                method: 'GET',
+                headers: { ...getRequestHeaders(), Accept: 'application/json' },
+                cache: 'no-store',
+            }, HEALTH_TIMEOUT_MS);
+        },
+
+        async readOpenAiBridgeLogs() {
+            return await fetchBridgeLogs(SERVER_ROUTES.OPENAI_BRIDGE_LOGS, 'GET');
+        },
+
+        async clearOpenAiBridgeLogs() {
+            return await fetchBridgeLogs(SERVER_ROUTES.OPENAI_BRIDGE_LOGS_CLEAR, 'POST');
+        },
+
+        async updateOpenAiBridge(payload) {
+            return await fetchJson(fetchImpl, SERVER_ROUTES.OPENAI_BRIDGE, {
+                method: 'POST',
+                headers: { ...getRequestHeaders(), Accept: 'application/json', 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                cache: 'no-store',
+            }, PREPARE_TIMEOUT_MS);
+        },
+
         async checkHealth() {
             const data = await fetchJson(fetchImpl, SERVER_ROUTES.HEALTH, {
                 method: 'GET',

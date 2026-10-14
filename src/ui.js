@@ -35,6 +35,8 @@ import {
     validatePluginState,
 } from './state-machine.js';
 
+import { createMessageCostPlacementControl } from './message-cost-settings.js';
+
 const RECONCILE_STABILITY_MS = 250;
 const PROFILE_TRANSITION_TIMEOUT_MS = 30_000;
 
@@ -155,6 +157,9 @@ export function createPayGoUi({
     notifyWarning = () => {},
     logger = console,
     localize,
+    getMessageCostPlacement = () => 'footer',
+    setMessageCostPlacement = () => {},
+    getMessageCostRecentCount = () => 20, setMessageCostRecentCount = () => {},
 }) {
     localize ??= createLocalizer((fallback, key) => context?.translate?.(fallback, key));
     const regionInput = document.getElementById('vertexai_region');
@@ -166,6 +171,9 @@ export function createPayGoUi({
     }
 
     const controls = buildControls(localize);
+    const placementControl = createMessageCostPlacementControl({ localize, getMessageCostPlacement, setMessageCostPlacement,
+        getMessageCostRecentCount, setMessageCostRecentCount });
+    controls.root.append(placementControl.root);
     const regionContainer = regionInput.closest('.flex-container.flexFlowColumn') ?? regionInput.parentElement;
     regionContainer.after(controls.root);
 
@@ -366,6 +374,7 @@ export function createPayGoUi({
     }
 
     function render() {
+        placementControl.render();
         const aiStudio = getSource() === AI_STUDIO_SOURCE;
         // One panel, one controller, and one set of listeners serve both sources.
         if (aiStudio && googleContainer && controls.root.parentElement !== googleContainer) {
@@ -971,6 +980,7 @@ export function createPayGoUi({
     void refreshHealth();
 
     return {
+        destroy() { placementControl.destroy(); controls.root.remove(); },
         getState: () => ({ ...state }),
         refreshHealth,
         viewLogs: () => runLogAction('view'),

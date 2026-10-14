@@ -117,6 +117,42 @@ test('missing native capabilities fail before loading libraries or installing ho
         loadLibrary: () => assert.fail('must not load unsupported host libraries') }), { code: 'TAURI_CAPABILITIES_UNAVAILABLE' });
 });
 
+test('native placement settings save, immediately rerender messages and survive runtime reload', async () => {
+    const context = nativeContext(); const documentRef = nativeDocument(); const store = nativeStore();
+    let saves = 0;
+    context.saveSettingsDebounced = () => { saves++; };
+    const target = { document: documentRef, location: { origin: 'http://tauri.localhost' }, fetch: async () => Response.json({}),
+        __TAURITAVERN__: { api: { extension: { store }, llmConnections: { save: async () => {} } } },
+        setInterval: () => 1, clearInterval() {} };
+    const displayed = []; const recentDisplayed = [];
+    const start = () => initTauriTavern({ target, getContext: () => context, loadLibrary: async () => ({ yaml }),
+        factories: { refreshPolicy: async () => ({ changed: false }),
+            messageCostUi: ({ getPlacement, getRecentCount }) => ({ render() { displayed.push(getPlacement()); recentDisplayed.push(getRecentCount()); }, destroy() {} }),
+        } });
+    let runtime = await start();
+    assert.equal(displayed.at(-1), 'footer');
+    const select = documentRef.getElementById('vertex-paygo-message-cost-placement');
+    select.value = 'hidden'; await select.fire('change');
+    assert.equal(displayed.at(-1), 'hidden');
+    assert.equal(saves, 1);
+    const recentInput = documentRef.getElementById('vertex-paygo-message-cost-recent-count');
+    assert.equal(recentDisplayed.at(-1), 20);
+    recentInput.value = '8'; await recentInput.fire('change');
+    assert.equal(recentDisplayed.at(-1), 8);
+    assert.equal(saves, 2);
+    runtime.destroy();
+    runtime = await start();
+    assert.equal(documentRef.getElementById('vertex-paygo-message-cost-placement').value, 'hidden');
+    assert.equal(displayed.at(-1), 'hidden');
+    assert.equal(documentRef.getElementById('vertex-paygo-message-cost-recent-count').value, '8');
+    assert.equal(recentDisplayed.at(-1), 8);
+    const restored = documentRef.getElementById('vertex-paygo-message-cost-placement');
+    restored.value = 'header'; await restored.fire('change');
+    assert.equal(displayed.at(-1), 'header');
+    assert.equal(saves, 3);
+    runtime.destroy();
+});
+
 test('capability gate accepts optional reads without requiring a second storage read API', () => {
     const context = nativeContext();
     const store = { setJson() {}, tryGetJson() {}, listKeys() {} };

@@ -7,7 +7,7 @@
  */
 
 export const EXTENSION_ID = 'vertex-paygo';
-export const CLIENT_VERSION = '0.4.0';
+export const CLIENT_VERSION = '0.5.0';
 export const CONFIG_VERSION = 1;
 export const PROTOCOL_VERSION = 2;
 export const REQUIRED_TRANSPORT = 'loopback-http';
@@ -39,11 +39,17 @@ export const SERVER_ROUTES = Object.freeze({
     LOGS: '/api/plugins/vertex-paygo/logs',
     CLIENT_LOG: '/api/plugins/vertex-paygo/logs/client',
     USAGE: '/api/plugins/vertex-paygo/usage',
+    OPENAI_BRIDGE: '/api/plugins/vertex-paygo/openai-bridge',
+    OPENAI_BRIDGE_LOGS: '/api/plugins/vertex-paygo/openai-bridge/logs',
+    OPENAI_BRIDGE_LOGS_CLEAR: '/api/plugins/vertex-paygo/openai-bridge/logs/clear',
 });
 
 export const HEALTH_TIMEOUT_MS = 5_000;
 export const LOG_TIMEOUT_MS = 5_000;
 export const MAX_LOG_RESPONSE_BYTES = 5 * 1024 * 1024;
+// Bridge logs can retain 20 MiB, plus the JSON response envelope.
+export const MAX_BRIDGE_LOG_RESPONSE_BYTES = 21 * 1024 * 1024;
+export const BRIDGE_LOG_TIMEOUT_MS = 30_000;
 // Full service-account authentication may need an OAuth token exchange before
 // the ticket can be issued.
 export const PREPARE_TIMEOUT_MS = 30_000;
