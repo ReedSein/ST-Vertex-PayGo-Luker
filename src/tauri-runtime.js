@@ -92,6 +92,11 @@ export async function initTauriTavern({ target = globalThis, documentRef = targe
         const connections = (factories.connections ?? createTauriConnections)({ getContext, api: target.__TAURITAVERN__.api, yaml });
         costs = (factories.costContext ?? createCostContext)({ getContext });
         controller = (factories.ui ?? createTauriUi)({ getContext, connections, yaml, documentRef, localize, notifyError, notifyWarning,
+            getMessageCostRecentCount: costs.getMessageCostRecentCount,
+            setMessageCostRecentCount(value) {
+                costs.setMessageCostRecentCount(value);
+                messageCostUi?.render();
+            },
             getMessageCostPlacement: costs.getMessageCostPlacement,
             setMessageCostPlacement(value) {
                 costs.setMessageCostPlacement(value);
@@ -103,6 +108,7 @@ export async function initTauriTavern({ target = globalThis, documentRef = targe
         messageCostUi = (factories.messageCostUi ?? createMessageCostUi)({ getContext, getMessageCost,
             documentRef, getPrices: costs.getPrices, localize,
             getPlacement: costs.getMessageCostPlacement,
+            getRecentCount: costs.getMessageCostRecentCount,
             onOpen: () => void messageCosts?.refresh({ retry: true }),
         });
         messageCosts = (factories.messageCosts ?? createMessageCosts)({ getContext,

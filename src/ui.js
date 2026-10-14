@@ -159,6 +159,7 @@ export function createPayGoUi({
     localize,
     getMessageCostPlacement = () => 'footer',
     setMessageCostPlacement = () => {},
+    getMessageCostRecentCount = () => 20, setMessageCostRecentCount = () => {},
 }) {
     localize ??= createLocalizer((fallback, key) => context?.translate?.(fallback, key));
     const regionInput = document.getElementById('vertexai_region');
@@ -170,7 +171,8 @@ export function createPayGoUi({
     }
 
     const controls = buildControls(localize);
-    const placementControl = createMessageCostPlacementControl({ localize, getMessageCostPlacement, setMessageCostPlacement });
+    const placementControl = createMessageCostPlacementControl({ localize, getMessageCostPlacement, setMessageCostPlacement,
+        getMessageCostRecentCount, setMessageCostRecentCount });
     controls.root.append(placementControl.root);
     const regionContainer = regionInput.closest('.flex-container.flexFlowColumn') ?? regionInput.parentElement;
     regionContainer.after(controls.root);
