@@ -26,6 +26,8 @@ export const MESSAGES = Object.freeze({
     "vertex_paygo.bridge.policy.unsaved": "Changes are not applied. Apply protocol and tier to update the running bridge.",
     "vertex_paygo.bridge.policy.on_enable": "These settings will be applied when you enable the bridge.",
     "vertex_paygo.bridge.policy.effective": "Last checked effective tier: {tier}",
+    "vertex_paygo.message_cost.recent_count": "Show costs for recent chat messages",
+    "vertex_paygo.message_cost.recent_count.guidance": "Only display costs within the latest N chat messages (1–1000, default 20), counting user and system messages too. This only affects price display; historical usage and cost records are retained.",
     "vertex_paygo.message_cost.placement": "Message cost position",
     "vertex_paygo.message_cost.placement.footer": "Message footer (default)",
     "vertex_paygo.message_cost.placement.header": "Message header",

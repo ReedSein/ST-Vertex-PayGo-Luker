@@ -6,7 +6,7 @@
 
 import { formatMessageCostLabel, formatMessageMoney, summarizeMessageCost } from './message-cost-view.js';
 import { createLocalizer, getTierLabel } from './i18n.js';
-import { normalizeMessageCostPlacement } from './message-cost-settings.js';
+import { DEFAULT_MESSAGE_COST_RECENT_COUNT, normalizeMessageCostPlacement, normalizeMessageCostRecentCount } from './message-cost-settings.js';
 
 const ROOT_CLASS = 'vertex-paygo-message-cost';
 const messageKey = name => `vertex_paygo.message_cost.${name}`;
@@ -117,11 +117,42 @@ function buildCard(documentRef, summary, onClose, localize) {
 }
 
 export function createMessageCostUi({ getContext, getMessageCost, getPrices, getPlacement = () => 'footer',
+    getRecentCount = () => DEFAULT_MESSAGE_COST_RECENT_COUNT,
     documentRef = globalThis.document, onOpen, localize } = {}) {
     localize ??= createLocalizer((fallback, key) => getContext?.()?.translate?.(fallback, key));
     let openCard = null;
     let openButton = null;
     let destroyed = false;
+    const chat = documentRef?.getElementById?.('chat');
+    const mountedMessages = new Map();
+    const mountedIds = new WeakMap();
+    const attachedButtons = new Map();
+    let lastWindow = null;
+
+    function indexMessage(element, remove = false) {
+        const previous = mountedIds.get(element);
+        if (mountedMessages.get(previous) === element) mountedMessages.delete(previous);
+        mountedIds.delete(element);
+        if (remove) return;
+        if (!element?.matches?.('.mes[mesid]') || (chat && !chat.contains(element))) return;
+        const id = element.getAttribute?.('mesid');
+        if (!/^(0|[1-9]\d*)$/.test(id ?? '')) return;
+        mountedMessages.set(id, element);
+        mountedIds.set(element, id);
+    }
+
+    function indexTree(element, remove = false) {
+        if (element?.matches?.('.mes[mesid]')) indexMessage(element, remove);
+        for (const message of element?.querySelectorAll?.('.mes[mesid]') ?? []) indexMessage(message, remove);
+    }
+
+    // Index mounted roots once, then maintain the index from DOM mutations.
+    // Regular cost refreshes must not walk an entire long chat's DOM.
+    function rebuildIndex() {
+        mountedMessages.clear();
+        for (const element of documentRef?.querySelectorAll?.('.mes[mesid]') ?? []) indexMessage(element);
+    }
+    rebuildIndex();
 
     function close() {
         openCard?.remove();
@@ -228,20 +259,38 @@ export function createMessageCostUi({ getContext, getMessageCost, getPrices, get
 
     function render(messageId) {
         if (destroyed || !documentRef) return;
+        if (!messageObserver) rebuildIndex();
         const placement = normalizeMessageCostPlacement(getPlacement());
         const messages = getContext?.()?.chat ?? [];
-        const elements = new Map([...(documentRef.querySelectorAll?.('.mes[mesid]') ?? [])]
-            .map(element => [element.getAttribute?.('mesid'), element]));
-        let keptOpen = false;
-        for (const [id, messageElement] of elements) {
-            const message = messages[Number(id)];
-            if (messageId != null && String(messageId) !== id) continue;
-            if (messageElement) {
-                const attached = attach(messageElement, message, id, placement);
-                if (attached && attached === openButton) keptOpen = true;
+        const start = Math.max(0, messages.length - normalizeMessageCostRecentCount(getRecentCount()));
+        const windowChanged = !lastWindow || lastWindow.messages !== messages
+            || lastWindow.start !== start || lastWindow.end !== messages.length || lastWindow.placement !== placement;
+        lastWindow = { messages, start, end: messages.length, placement };
+        for (const [element, button] of attachedButtons) {
+            const id = button.dataset.messageId;
+            if (placement !== 'hidden' && Number(id) >= start && Number(id) < messages.length
+                && mountedMessages.get(id) === element) continue;
+            if (button === openButton) close();
+            button.remove();
+            attachedButtons.delete(element);
+        }
+        if (placement === 'hidden') return;
+        const requested = messageId == null ? null : Number(messageId);
+        for (let index = start; index < messages.length; index++) {
+            if (!windowChanged && requested !== null && requested !== index) continue;
+            const element = mountedMessages.get(String(index));
+            if (!element) continue;
+            const previous = attachedButtons.get(element);
+            const attached = attach(element, messages[index], String(index), placement);
+            if (previous && previous !== attached) {
+                if (previous === openButton) close();
+                previous.remove();
+            }
+            if (attached) attachedButtons.set(element, attached);
+            else {
+                attachedButtons.delete(element);
             }
         }
-        if (openCard && !keptOpen && (messageId == null || openButton?.dataset.messageId === String(messageId))) close();
     }
 
     const outside = event => {
@@ -275,13 +324,29 @@ export function createMessageCostUi({ getContext, getMessageCost, getPrices, get
         attributes: true, attributeFilter: ['href', 'media', 'disabled'] });
     // Native chat virtualization can remount a message without a generation
     // event. Only react to message roots, ignoring our own button/card changes.
-    const chat = documentRef?.getElementById?.('chat');
     const containsMessage = element => element?.matches?.('.mes[mesid]')
         || element?.querySelector?.('.mes[mesid]');
     let renderQueued = false;
     const messageObserver = Observer && chat ? new Observer(records => {
-        if (!records.some(record => record.type === 'attributes'
-            || [...record.addedNodes, ...record.removedNodes].some(containsMessage))) return;
+        let changed = false;
+        for (const record of records) {
+            if (record.type === 'attributes') {
+                indexMessage(record.target);
+                changed = true;
+                continue;
+            }
+            for (const element of record.removedNodes) {
+                if (!containsMessage(element)) continue;
+                indexTree(element, true);
+                changed = true;
+            }
+            for (const element of record.addedNodes) {
+                if (!containsMessage(element)) continue;
+                indexTree(element);
+                changed = true;
+            }
+        }
+        if (!changed) return;
         if (renderQueued) return;
         renderQueued = true;
         queueMicrotask(() => { renderQueued = false; render(); });
@@ -300,7 +365,9 @@ export function createMessageCostUi({ getContext, getMessageCost, getPrices, get
         layoutObserver?.disconnect();
         themeObserver?.disconnect();
         messageObserver?.disconnect();
-        for (const trigger of documentRef?.querySelectorAll?.(`.${ROOT_CLASS}-trigger`) ?? []) trigger.remove();
+        for (const trigger of attachedButtons.values()) trigger.remove();
+        attachedButtons.clear();
+        mountedMessages.clear();
     }
 
     return { render, close, destroy };

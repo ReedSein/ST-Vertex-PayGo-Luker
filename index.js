@@ -123,6 +123,11 @@ export async function init() {
             notifyWarning: message => notify('warning', message),
             logger: clientLogger,
             localize,
+            getMessageCostRecentCount: costContext.getMessageCostRecentCount,
+            setMessageCostRecentCount(value) {
+                costContext.setMessageCostRecentCount(value);
+                messageCostUi?.render();
+            },
             getMessageCostPlacement: costContext.getMessageCostPlacement,
             setMessageCostPlacement(value) {
                 costContext.setMessageCostPlacement(value);
@@ -136,6 +141,7 @@ export async function init() {
             getMessageCost,
             getPrices: costContext.getPrices,
             getPlacement: costContext.getMessageCostPlacement,
+            getRecentCount: costContext.getMessageCostRecentCount,
             localize,
             onOpen: () => void messageCosts?.refresh({ retry: true }),
         });

@@ -41,6 +41,7 @@ function fakeDom({ avatarVisible = true } = {}) {
             const selectors = selector.split(',').map(value => value.trim());
             return walk(this).find(item => selectors.some(value => matches(item, value))) ?? null;
         }
+        querySelectorAll(selector) { return walk(this).filter(item => matches(item, selector)); }
     }
     const matches = (element, selector) => {
         const match = /^\.([^[]+)(?:\[([^\]]+)\])?$/.exec(selector);
@@ -83,6 +84,170 @@ function fakeDom({ avatarVisible = true } = {}) {
 
 function allText(elements) { return elements.map(element => element.textContent).filter(Boolean); }
 function find(elements, className) { return elements.find(element => element.className === className); }
+
+function appendMessage(dom, id) {
+    const message = dom.document.createElement('div');
+    message.className = 'mes';
+    message.setAttribute('mesid', String(id));
+    const block = dom.document.createElement('div');
+    block.className = 'mes_block';
+    message.append(block);
+    dom.document.body.append(message);
+    return message;
+}
+
+test('long chats only read recent floor snapshots and do not rescan the DOM on refresh', () => {
+    const dom = fakeDom();
+    const chat = Array.from({ length: 10_000 }, (_, id) => ({ id }));
+    for (let id = 1; id < chat.length; id++) appendMessage(dom, id);
+    chat[9_999].is_user = true;
+    chat[9_998].is_system = true;
+    const read = [];
+    let scans = 0;
+    const query = dom.document.querySelectorAll;
+    dom.document.querySelectorAll = function (selector) { scans++; return query.call(this, selector); };
+    const ui = createUi({ documentRef: dom.document, getContext: () => ({ chat }),
+        getMessageCost: message => { read.push(message.id); return snapshot; } });
+    ui.render();
+    assert.deepEqual(read, Array.from({ length: 18 }, (_, i) => 9_980 + i));
+    assert.equal(dom.walk().filter(item => item.className === 'vertex-paygo-message-cost-trigger').length, 18);
+    read.length = 0;
+    ui.render(9_997);
+    assert.deepEqual(read, [9_997]);
+    ui.render(0);
+    assert.deepEqual(read, [9_997]);
+    assert.equal(scans, 1);
+    ui.destroy();
+});
+
+test('moving and resizing the recent window removes old triggers and closes their details', async () => {
+    const dom = fakeDom();
+    const chat = [{ id: 0 }, { id: 1 }, { id: 2 }];
+    appendMessage(dom, 1);
+    appendMessage(dom, 2);
+    let count = 3;
+    const read = [];
+    const ui = createUi({ documentRef: dom.document, getContext: () => ({ chat }), getRecentCount: () => count,
+        getMessageCost: message => { read.push(message.id); return snapshot; } });
+    const ids = () => dom.walk().filter(item => item.className === 'vertex-paygo-message-cost-trigger')
+        .map(button => button.dataset.messageId);
+    ui.render();
+    const first = dom.block.children.at(-1);
+    first.onclick({ stopPropagation() {} });
+    count = 2;
+    read.length = 0;
+    ui.render(2);
+    assert.deepEqual(ids(), ['1', '2']);
+    assert.deepEqual(read, [1, 2]);
+    assert.equal(first.parentElement, null);
+    assert.equal(find(dom.walk(), 'vertex-paygo-message-cost-card'), undefined);
+    const next = appendMessage(dom, 3);
+    chat.push({ id: 3 });
+    dom.observers.find(observer => observer.options.attributeFilter?.includes('mesid'))
+        .callback([{ type: 'childList', addedNodes: [next], removedNodes: [] }]);
+    await Promise.resolve();
+    assert.deepEqual(ids(), ['2', '3']);
+    count = 4;
+    ui.render();
+    assert.deepEqual(ids(), ['0', '1', '2', '3']);
+    chat.pop();
+    next.remove();
+    dom.observers.find(observer => observer.options.attributeFilter?.includes('mesid'))
+        .callback([{ type: 'childList', addedNodes: [], removedNodes: [next] }]);
+    await Promise.resolve();
+    assert.deepEqual(ids(), ['0', '1', '2']);
+    ui.destroy();
+});
+
+test('reindexes renumbered and wrapped remounted messages without reading older floors', async () => {
+    const dom = fakeDom();
+    const chat = Array.from({ length: 5 }, (_, id) => ({ id }));
+    let reads = 0;
+    const ui = createUi({ documentRef: dom.document, getContext: () => ({ chat }), getRecentCount: () => 1,
+        getMessageCost: () => { reads++; return snapshot; } });
+    ui.render();
+    assert.equal(reads, 0);
+    const observer = dom.observers.find(item => item.options.attributeFilter?.includes('mesid'));
+    const wrapper = dom.document.createElement('div');
+    const recent = appendMessage(dom, 4);
+    wrapper.append(recent);
+    dom.document.body.append(wrapper);
+    observer.callback([{ type: 'childList', addedNodes: [wrapper], removedNodes: [] }]);
+    await Promise.resolve();
+    assert.equal(reads, 1);
+    const button = recent.children[0].children[0];
+    button.onclick({ stopPropagation() {} });
+    recent.setAttribute('mesid', '1');
+    observer.callback([{ type: 'attributes', target: recent }]);
+    await Promise.resolve();
+    assert.equal(reads, 2); // The click reads once; renumbering into old history does not.
+    assert.equal(button.parentElement, null);
+    assert.equal(find(dom.walk(), 'vertex-paygo-message-cost-card'), undefined);
+    ui.destroy();
+});
+
+test('chat replacement clears detached triggers and hidden placement reads no snapshots', async () => {
+    const dom = fakeDom();
+    let chat = [{ id: 'old' }];
+    let placement = 'footer';
+    const read = [];
+    const ui = createUi({ documentRef: dom.document, getContext: () => ({ chat }), getPlacement: () => placement,
+        getMessageCost: message => { read.push(message.id); return snapshot; } });
+    ui.render();
+    const oldButton = dom.block.children.at(-1);
+    oldButton.onclick({ stopPropagation() {} });
+    dom.message.remove();
+    chat = [{ id: 'new' }];
+    const replacement = appendMessage(dom, 0);
+    dom.observers.find(item => item.options.attributeFilter?.includes('mesid'))
+        .callback([{ type: 'childList', addedNodes: [replacement], removedNodes: [dom.message] }]);
+    await Promise.resolve();
+    assert.equal(oldButton.parentElement, null);
+    assert.equal(find(dom.walk(), 'vertex-paygo-message-cost-card'), undefined);
+    assert.equal(read.at(-1), 'new');
+    read.length = 0;
+    placement = 'hidden';
+    ui.render();
+    assert.deepEqual(read, []);
+    assert.equal(find(dom.walk(), 'vertex-paygo-message-cost-trigger'), undefined);
+    ui.destroy();
+});
+
+test('rebuilding message contents closes details anchored to a removed trigger', () => {
+    const dom = fakeDom();
+    const ui = createUi({ documentRef: dom.document, getContext: () => ({ chat: [{}] }), getMessageCost: () => snapshot });
+    ui.render();
+    const oldButton = dom.block.children.at(-1);
+    oldButton.onclick({ stopPropagation() {} });
+    const block = dom.document.createElement('div');
+    block.className = 'mes_block';
+    dom.message.replaceChildren(block);
+    ui.render(0);
+    assert.equal(find(dom.walk(), 'vertex-paygo-message-cost-card'), undefined);
+    assert.equal(oldButton.parentElement, null);
+    const replacement = block.children[0];
+    assert.notEqual(replacement, oldButton);
+    replacement.onclick({ stopPropagation() {} });
+    assert.ok(find(dom.walk(), 'vertex-paygo-message-cost-card'));
+    ui.destroy();
+});
+
+test('late attributes on a detached root cannot replace a live message in the index', async () => {
+    const dom = fakeDom();
+    const ui = createUi({ documentRef: dom.document, getContext: () => ({ chat: [{}] }), getMessageCost: () => snapshot });
+    ui.render();
+    dom.message.remove();
+    const replacement = appendMessage(dom, 0);
+    dom.observers.find(item => item.options.attributeFilter?.includes('mesid')).callback([
+        { type: 'childList', addedNodes: [], removedNodes: [dom.message] },
+        { type: 'childList', addedNodes: [replacement], removedNodes: [] },
+        { type: 'attributes', target: dom.message },
+    ]);
+    await Promise.resolve();
+    assert.equal(replacement.children[0].children[0]?.className, 'vertex-paygo-message-cost-trigger');
+    assert.equal(dom.block.children.some(child => child.className === 'vertex-paygo-message-cost-trigger'), false);
+    ui.destroy();
+});
 
 test('message card shows weighted cache hit rate and unknown normalized cache separately from zero', () => {
     const dom = fakeDom();

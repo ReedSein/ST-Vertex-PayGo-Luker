@@ -30,6 +30,7 @@ export function currentTauriRequest(context) {
 // Parameters edits therefore cannot diverge from a second extension-only tier.
 export function createTauriUi({ getContext, connections, yaml, documentRef = globalThis.document,
     getMessageCostPlacement = () => 'footer', setMessageCostPlacement = () => {},
+    getMessageCostRecentCount = () => 20, setMessageCostRecentCount = () => {},
     localize = createLocalizer(), notifyError = () => {}, notifyWarning = () => {} }) {
     const container = documentRef.getElementById('extensions_settings2')
         ?? documentRef.getElementById('extensions_settings');
@@ -65,7 +66,8 @@ export function createTauriUi({ getContext, connections, yaml, documentRef = glo
     content.append(scopeLabel, scope, refresh, modelLabel, tierLabel, tier, paygoLabel, status,
         element('small', localize('vertex_paygo.tauri.persistence'), { class: 'vertex-paygo-guidance' }),
         element('small', localize('vertex_paygo.tauri.cost_notice'), { class: 'vertex-paygo-guidance' }));
-    const placementControl = createMessageCostPlacementControl({ documentRef, localize, getMessageCostPlacement, setMessageCostPlacement });
+    const placementControl = createMessageCostPlacementControl({ documentRef, localize, getMessageCostPlacement, setMessageCostPlacement,
+        getMessageCostRecentCount, setMessageCostRecentCount });
     content.append(placementControl.root);
     drawerContent.append(content);
     container.append(root);

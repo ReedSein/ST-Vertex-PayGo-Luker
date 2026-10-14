@@ -80,3 +80,20 @@ test('pricing is isolated by provider/model/tier and captured as an independent 
     assert.equal(api.getUsagePrice({ ...data, chat_completion_source: 'makersuite' }, key), null);
     assert.throws(() => api.setPrices({ bad: { input: -1 } }));
 });
+
+test('recent message count defaults, normalizes and persists globally', () => {
+    const { current, api } = fixture();
+    assert.equal(api.getMessageCostRecentCount(), 20);
+    assert.equal(current.saves, 0);
+    for (const [value, expected] of [[5, 5], ['42', 42], [5.9, 5], [0, 1], [2000, 1000], [Infinity, 20], ['', 20]]) {
+        api.setMessageCostRecentCount(value);
+        const reload = createCostContext({ getContext: () => current });
+        current.chatId = 'other-chat';
+        assert.equal(reload.getMessageCostRecentCount(), expected);
+        reload.destroy();
+    }
+    assert.equal(current.saves, 7);
+    assert.deepEqual(current.extensionSettings['vertex-paygo-costs'].conversations, {});
+    assert.deepEqual(current.extensionSettings['vertex-paygo-costs'].prices, {});
+    api.destroy();
+});

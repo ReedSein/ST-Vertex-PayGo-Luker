@@ -106,12 +106,19 @@ test('one settings controller moves between sources, preserves profiles, and app
         saveSettingsDebounced() {},
     };
     let placement = 'avatar';
+    let recentCount = 20; const recentCalls = [];
     const placementCalls = [];
     const ui = createPayGoUi({ context, getMessageCostPlacement: () => placement,
+        getMessageCostRecentCount: () => recentCount,
+        setMessageCostRecentCount: value => { recentCount = value; recentCalls.push(value); },
         setMessageCostPlacement: value => { placement = value; placementCalls.push(value); }, serverClient: { checkHealth: async () => ({ capabilities: {} }) } });
     await Promise.resolve();
     const placementSelect = dom.document.getElementById('vertex-paygo-message-cost-placement');
     assert.equal(placementSelect.value, 'avatar');
+    const recentInput = dom.document.getElementById('vertex-paygo-message-cost-recent-count');
+    assert.equal(recentInput.value, '20');
+    recentInput.value = '7'; await recentInput.fire('change');
+    assert.deepEqual(recentCalls, [7]);
     assert.equal(placementSelect.disabled, undefined);
     placementSelect.value = 'hidden';
     await placementSelect.fire('change');
