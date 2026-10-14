@@ -183,7 +183,7 @@
   "vertex_paygo.bridge.connection": "Fixed connection: {source} · {model} · {region}",
   "vertex_paygo.bridge.current": "Current connection: {source} · {model}",
   "vertex_paygo.bridge.guidance": "Enter this Base URL and API key manually in an OpenAI-compatible client. st-current uses the bound connection model. /models lists Gemini candidates from Google’s catalog; you can also specify a model explicitly. Changing your main connection does not update this bridge; use Update to current connection.",
-  "vertex_paygo.bridge.limitations": "Defaults to Google’s official OpenAI-compatible API. Vertex can opt into a Gemini conversion gateway; AI Studio is unchanged. Catalog listing does not guarantee model support. No automatic fallback or account-safety guarantee. Local server and CLI clients work; Debug allows localhost pages with the bridge key. After restart, enable again and enter the new temporary API key; the fixed Base URL is unchanged.",
+  "vertex_paygo.bridge.limitations": "Defaults to Google’s official OpenAI-compatible API. Vertex can opt into a Gemini conversion gateway; AI Studio is unchanged. Catalog listing does not guarantee model support. No automatic fallback or account-safety guarantee. Local server and CLI clients work; Debug allows localhost pages with the bridge key. The host saves the bridge switch and bound configuration. An enabled bridge restores at startup with the same API key and fixed Base URL. If its saved Google credential is unavailable, locally invalid or changed on a legacy host, restoration leaves the bridge disabled; it never switches to the current main connection.",
   "vertex_paygo.bridge.tauri_unavailable": "The Google OpenAI-compatible bridge is unavailable in TauriTavern. Native PayGo controls remain available.",
   "vertex_paygo.bridge.upgrade": "Update the Server Plugin to use the Google OpenAI-compatible bridge.",
   "vertex_paygo.bridge.invalid_response": "Server Plugin returned an invalid bridge response.",
@@ -194,7 +194,7 @@
   "vertex_paygo.bridge.validation.region": "Select a valid Vertex AI region before enabling the bridge.",
   "vertex_paygo.bridge.active_secret_unavailable": "No valid active Google credential is available. Select one in connection settings, then refresh.",
   "vertex_paygo.bridge.debug": "Debug: allow localhost browser calls",
-  "vertex_paygo.bridge.debug_guidance": "Allows pages served over HTTP(S) from localhost, 127.0.0.1 or [::1]. The bridge API key is still required. Local CLI clients already work without Debug.",
+  "vertex_paygo.bridge.debug_guidance": "Allows pages served over HTTP(S) from localhost, 127.0.0.1 or [::1]. The bridge API key is still required. Local CLI clients already work without Debug. Debug settings are saved with the enabled bridge and restored at startup.",
   "vertex_paygo.bridge.debug_upgrade": "Update the Server Plugin to use localhost browser Debug access.",
   "vertex_paygo.bridge.logs.title": "Bridge API logs",
   "vertex_paygo.bridge.logs.refresh": "Refresh API logs",
@@ -237,5 +237,6 @@
   "vertex_paygo.message_cost.placement.hidden": "Hidden",
   "vertex_paygo.message_cost.placement.guidance": "Applies globally to all chats and API sources. Hiding costs does not stop usage and cost recording.",
   "vertex_paygo.message_cost.recent_count": "Show costs for recent chat messages",
-  "vertex_paygo.message_cost.recent_count.guidance": "Only display costs within the latest N chat messages (1–1000, default 20), counting user and system messages too. This only affects price display; historical usage and cost records are retained."
+  "vertex_paygo.message_cost.recent_count.guidance": "Only display costs within the latest N chat messages (1–1000, default 20), counting user and system messages too. This only affects price display; historical usage and cost records are retained.",
+  "vertex_paygo.bridge.status_on_persistent": "Bridge enabled. It will restore automatically at the next host startup."
 }

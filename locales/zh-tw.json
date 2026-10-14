@@ -183,7 +183,7 @@
   "vertex_paygo.bridge.connection": "固定連線：{source} · {model} · {region} 喵",
   "vertex_paygo.bridge.current": "目前連線：{source} · {model} 喵",
   "vertex_paygo.bridge.guidance": "請在 OpenAI 相容用戶端中手動填入基礎 URL 與 API 金鑰喵。st-current 會直接使用綁定連線的模型；/models 會從 Google 官方目錄列出候選的 Gemini 模型，也可以直接明確指定模型喵。切換主要連線不會自動更新橋接；需要時請點選「更新為目前連線喵」~",
-  "vertex_paygo.bridge.limitations": "預設使用 Google 官方 OpenAI 相容介面，Vertex 可手動選擇 Gemini 格式轉換閘道；AI Studio 維持原行為喵。模型目錄列出的模型不保證都能正常使用喵。不會自動回退層級，也不保證帳號安全唷。本機伺服器端與命令列可直接呼叫；開啟 Debug 後才允許攜帶橋接 key 的 localhost 頁面呼叫喵。重新啟動後需要重新啟用並填入新 key，固定的基礎 URL 不變喵~",
+  "vertex_paygo.bridge.limitations": "預設使用 Google 官方 OpenAI 相容介面，Vertex 可手動選擇 Gemini 格式轉換閘道；AI Studio 維持原行為喵。模型目錄列出的模型不保證都能正常使用喵。不會自動回退層級，也不保證帳號安全唷。本機伺服器端與命令列可直接呼叫；開啟 Debug 後才允許攜帶橋接 key 的 localhost 頁面呼叫喵。宿主會記住橋接開關和固定設定，已啟用的橋接會在啟動時自動恢復，API key 和固定的基礎 URL 不變喵。儲存的 Google 憑證遺失、本機驗證失敗，或在舊版宿主上已變更時，會保持關閉，不會改用目前主要連線喵~",
   "vertex_paygo.bridge.tauri_unavailable": "TauriTavern 暫不支援 Google OpenAI 相容橋接喵；原有的 PayGo 控制項依然可以正常使用唷~",
   "vertex_paygo.bridge.upgrade": "請更新伺服器端外掛以使用 Google OpenAI 相容橋接喵。",
   "vertex_paygo.bridge.invalid_response": "伺服器端外掛傳回了無效的橋接回應喵 QAQ",
@@ -194,7 +194,7 @@
   "vertex_paygo.bridge.validation.region": "啟用橋接前請先選擇有效的 Vertex AI 區域喵。",
   "vertex_paygo.bridge.active_secret_unavailable": "找不到有效的使用中 Google 憑證喵。請先在連線設定中選好憑證，然後再重新整理一下喵~",
   "vertex_paygo.bridge.debug": "Debug：允許 localhost 瀏覽器呼叫喵",
-  "vertex_paygo.bridge.debug_guidance": "允許來自 HTTP(S) localhost、127.0.0.1 或 [::1] 頁面的呼叫，但依然需要攜帶橋接 API 金鑰喵。本機命令列 CLI 用戶端不需要開 Debug 也能直接呼叫唷~",
+  "vertex_paygo.bridge.debug_guidance": "允許來自 HTTP(S) localhost、127.0.0.1 或 [::1] 頁面的呼叫，但依然需要攜帶橋接 API 金鑰喵。本機命令列 CLI 用戶端不需要開 Debug 也能直接呼叫唷~ 已啟用橋接的 Debug 設定也會儲存，並在宿主啟動時一起恢復喵。",
   "vertex_paygo.bridge.debug_upgrade": "請更新伺服器端外掛以使用 localhost 瀏覽器 Debug 存取喵。",
   "vertex_paygo.bridge.logs.title": "橋接 API 日誌",
   "vertex_paygo.bridge.logs.refresh": "重新整理 API 日誌 🐾",
@@ -237,5 +237,6 @@
   "vertex_paygo.message_cost.placement.hidden": "隱藏",
   "vertex_paygo.message_cost.placement.guidance": "此設定會全域套用至所有聊天與 API 來源喵。即使把費用藏起來，後台也依然會乖乖記錄用量與費用的喵~",
   "vertex_paygo.message_cost.recent_count": "顯示最近聊天樓層的費用",
-  "vertex_paygo.message_cost.recent_count.guidance": "僅在最近 N 層聊天訊息內顯示費用（1–1000，預設 20），使用者和系統訊息也計入樓層數。此設定僅影響價格顯示，歷史用量和費用記錄仍保留。"
+  "vertex_paygo.message_cost.recent_count.guidance": "僅在最近 N 層聊天訊息內顯示費用（1–1000，預設 20），使用者和系統訊息也計入樓層數。此設定僅影響價格顯示，歷史用量和費用記錄仍保留。",
+  "vertex_paygo.bridge.status_on_persistent": "橋接已啟用，下次宿主啟動時會自動恢復喵~"
 }

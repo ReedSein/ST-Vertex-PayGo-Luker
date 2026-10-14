@@ -111,6 +111,7 @@ export function createOpenAiBridgeUi({ context, serverClient, localize, document
     let debugSupported = false;
     let logsSupported = false;
     let gatewaySupported = false;
+    let persistenceSupported = false;
     let policyDirty = false;
     let logsBusy = false;
     let logsLoaded = false;
@@ -155,10 +156,10 @@ export function createOpenAiBridgeUi({ context, serverClient, localize, document
                         tier: localize(`vertex_paygo.tier.${effective}`),
                     }) : localize('vertex_paygo.bridge.policy.on_enable'));
         policyStatus.classList.toggle('vertex-paygo-status--error', invalidPolicy() || Boolean(state?.tierError));
-        status.textContent = errorText || localize(healthy
-            ? (enabled ? 'vertex_paygo.bridge.status_on' : 'vertex_paygo.bridge.status_off')
+        status.textContent = errorText || state?.restoreError || localize(healthy
+            ? (enabled ? (persistenceSupported ? 'vertex_paygo.bridge.status_on_persistent' : 'vertex_paygo.bridge.status_on') : 'vertex_paygo.bridge.status_off')
             : 'vertex_paygo.bridge.status_unavailable');
-        status.classList.toggle('vertex-paygo-status--error', Boolean(errorText) || !healthy);
+        status.classList.toggle('vertex-paygo-status--error', Boolean(errorText || state?.restoreError) || !healthy);
         const saved = state?.connection;
         connection.textContent = enabled && saved
             ? localize('vertex_paygo.bridge.connection', { source: saved.source, model: saved.model,
@@ -168,7 +169,7 @@ export function createOpenAiBridgeUi({ context, serverClient, localize, document
                     model: selected.connection.model })
                 : issueText(selected.code);
         enable.disabled = busy || !healthy || enabled || !selected.ok || (vertex && gatewaySupported && invalidPolicy());
-        disable.disabled = busy || !healthy || !enabled;
+        disable.disabled = busy || !healthy || (!enabled && !state?.restorePending);
         update.disabled = busy || !healthy || !enabled || !selected.ok;
         rotate.disabled = busy || !healthy || !enabled;
         refresh.disabled = busy;
@@ -206,6 +207,7 @@ export function createOpenAiBridgeUi({ context, serverClient, localize, document
                 return;
             }
             healthy = true;
+            persistenceSupported = health.capabilities?.openaiBridgePersistence === true;
             gatewaySupported = health.capabilities?.openaiBridgeGateway === true;
             logsSupported = health.capabilities?.openaiBridgeLogs === true;
             debugSupported = health.capabilities?.openaiBridgeDebug === true;

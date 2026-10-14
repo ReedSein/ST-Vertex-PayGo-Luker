@@ -13,14 +13,14 @@ const vertex = { source: 'vertexai', model: 'gemini-2.5-flash', authMode: 'full'
 const active = { ok: true, enabled: true, baseUrl: 'http://127.0.0.1:18443/openai/v1',
     apiKey: 'fake-long-bridge-key', connection: vertex, model: 'st-current',
     mode: 'openai', tierSource: 'independent', tier: 'standard', effectiveTier: 'standard', tierError: null };
-function fixture({ state = disabled, capability = true, source = 'vertexai' } = {}) {
+function fixture({ state = disabled, capability = true, source = 'vertexai', persistence = false } = {}) {
     const context = nativeContext();
     context.chatCompletionSettings.vertexai_auth_mode = 'full';
     context.chatCompletionSettings.chat_completion_source = source;
     const documentRef = nativeDocument();
     const writes = [];
     const ui = createOpenAiBridgeUi({ context, documentRef, localize: createLocalizer(), serverClient: {
-        checkHealth: async () => ({ capabilities: { openaiBridge: true, openaiBridgeGateway: capability } }),
+        checkHealth: async () => ({ capabilities: { openaiBridge: true, openaiBridgeGateway: capability, openaiBridgePersistence: persistence } }),
         readOpenAiBridge: async () => state,
         readActiveGoogleSecretId: async () => 'fixed-secret-id',
         updateOpenAiBridge: async payload => {
@@ -37,8 +37,28 @@ function fixture({ state = disabled, capability = true, source = 'vertexai' } = 
         const find = node => node.tagName === 'BUTTON' && node.textContent === label ? node : node.children.map(find).find(Boolean);
         return find(documentRef);
     };
-    return { ui, get, button, writes, context };
+    return { ui, get, button, writes, context, documentRef };
 }
+
+test('restart persistence status is capability gated and failed restoration can be disabled', async () => {
+    const allText = node => [node.textContent, ...node.children.flatMap(allText)].join('\n');
+    for (const persistence of [false, true]) {
+        const f = fixture({ state: active, persistence }); await tick();
+        assert.equal(allText(f.documentRef).includes('Bridge enabled. It will restore automatically at the next host startup.'), persistence);
+        f.ui.destroy();
+    }
+    const failed = fixture({ persistence: true, state: { ...disabled, restorePending: true, restoreError: '<b>Credential unavailable</b>' } });
+    await tick();
+    assert.ok(allText(failed.documentRef).includes('<b>Credential unavailable</b>'));
+    assert.equal(failed.button('Disable bridge').disabled, false);
+    await failed.button('Disable bridge').fire('click'); await tick();
+    assert.deepEqual(failed.writes, [{ enabled: false }]);
+    assert.equal(failed.button('Disable bridge').disabled, true);
+    assert.equal(allText(failed.documentRef).includes('<b>Credential unavailable</b>'), false);
+    assert.equal(validateBridgeState({ ...disabled, restorePending: 'yes' }), false);
+    assert.equal(validateBridgeState({ ...active, restorePending: true }), false);
+    failed.ui.destroy();
+});
 
 test('Vertex gateway is opt in; policy is applied explicitly and keeps account binding', async () => {
     const f = fixture({ state: active });
