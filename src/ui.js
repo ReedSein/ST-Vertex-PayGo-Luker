@@ -133,15 +133,15 @@ function buildControls(localize) {
     );
     logActions.append(viewLogsButton, saveLogsButton);
 
-    const updateRow = createElement('div', { class: 'vertex-paygo-update-row' });
+    const updateRow = createElement('div', { id: 'vertex-paygo-update-row', class: 'vertex-paygo-update-row' });
     const checkUpdateButton = createElement(
         'button',
-        { type: 'button', class: 'menu_button vertex-paygo-update-check', 'data-i18n': 'vertex_paygo.update.check' },
+        { id: 'vertex-paygo-update-check', type: 'button', class: 'menu_button vertex-paygo-update-check', 'data-i18n': 'vertex_paygo.update.check' },
         localize('vertex_paygo.update.check'),
     );
     const applyUpdateButton = createElement(
         'button',
-        { type: 'button', class: 'menu_button vertex-paygo-update-apply', 'data-i18n': 'vertex_paygo.update.apply' },
+        { id: 'vertex-paygo-update-apply', type: 'button', class: 'menu_button vertex-paygo-update-apply', 'data-i18n': 'vertex_paygo.update.apply' },
         localize('vertex_paygo.update.apply'),
     );
     const updateNotice = createElement(
@@ -149,7 +149,7 @@ function buildControls(localize) {
         { class: 'vertex-paygo-update-notice', 'data-i18n': 'vertex_paygo.update.notice' },
         localize('vertex_paygo.update.notice'),
     );
-    const updateStatus = createElement('small', { class: 'vertex-paygo-update-status', 'aria-live': 'polite' });
+    const updateStatus = createElement('small', { id: 'vertex-paygo-update-status', class: 'vertex-paygo-update-status', 'aria-live': 'polite' });
     updateRow.append(checkUpdateButton, applyUpdateButton, updateNotice, updateStatus);
 
     root.append(tierRow, paygoLabel, guidance, policyStatus, serverRow, logActions, updateRow);

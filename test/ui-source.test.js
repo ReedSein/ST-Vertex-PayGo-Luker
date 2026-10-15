@@ -160,3 +160,97 @@ test('one settings controller moves between sources, preserves profiles, and app
     await placementSelect.fire('change');
     assert.deepEqual(placementCalls, ['hidden']);
 });
+
+function createUpdaterContext() {
+    const profile = { id: 'vertex', api: 'vertexai', mode: 'cc', [EXTENSION_ID]: { tier: 'standard', paygoOnly: false } };
+    return {
+        chatCompletionSettings: { chat_completion_source: 'vertexai', vertexai_model: 'gemini-3.8-flash', vertexai_region: 'us-central1' },
+        extensionSettings: { connectionManager: { selectedProfile: 'vertex', profiles: [profile] } },
+        eventTypes: new Proxy({}, { get: (_target, key) => key }),
+        eventSource: { on() {}, once() {} },
+        Popup: { show: { confirm: async () => 1 } },
+        POPUP_RESULT: { AFFIRMATIVE: 1, NEGATIVE: 0 },
+        saveSettingsDebounced() {},
+    };
+}
+
+// The controller reads a few host globals; the same adapter as above keeps this
+// regression dependency-free.
+function installHostDom(t, dom) {
+    for (const [key, value] of Object.entries({ document: dom.document, Element: dom.Element, HTMLInputElement: dom.Input, HTMLSelectElement: dom.Select })) {
+        const descriptor = Object.getOwnPropertyDescriptor(globalThis, key);
+        Object.defineProperty(globalThis, key, { value, configurable: true });
+        t.after(() => descriptor ? Object.defineProperty(globalThis, key, descriptor) : delete globalThis[key]);
+    }
+}
+
+const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+
+test('the update row stays hidden while the backend does not advertise it', async t => {
+    const dom = createHostDom();
+    installHostDom(t, dom);
+    const ui = createPayGoUi({
+        context: createUpdaterContext(),
+        serverClient: { checkHealth: async () => ({ capabilities: {} }) },
+    });
+    await settle();
+    assert.equal(dom.document.getElementById('vertex-paygo-update-row').hidden, true);
+    ui.destroy();
+});
+
+test('an available update is confirmed before anything is replaced', async t => {
+    const dom = createHostDom();
+    installHostDom(t, dom);
+    const confirmations = [];
+    let starts = 0;
+    const context = createUpdaterContext();
+    context.Popup = {
+        show: {
+            confirm: async (title, body, options) => {
+                confirmations.push({ title, body, options });
+                return context.POPUP_RESULT.NEGATIVE;
+            },
+        },
+    };
+    const ui = createPayGoUi({
+        context,
+        serverClient: {
+            checkHealth: async () => ({ capabilities: { updater: true } }),
+            checkUpdate: async () => ({
+                ok: true,
+                status: 'update-available',
+                components: [
+                    { name: 'frontend', status: 'update', target: { tag: 'v0.5.1', commit: 'a'.repeat(40) }, channel: { branch: 'main', mode: 'tag' } },
+                    { name: 'server', status: 'update', target: { tag: 'v0.5.1', commit: 'b'.repeat(40) }, channel: { branch: 'main', mode: 'tag' } },
+                ],
+            }),
+            startUpdate: async () => { starts += 1; return { ok: true, started: true }; },
+            readUpdateStatus: async () => ({ ok: true, running: false, lastResult: { status: 'updated' } }),
+        },
+    });
+    await settle();
+
+    const row = dom.document.getElementById('vertex-paygo-update-row');
+    const check = dom.document.getElementById('vertex-paygo-update-check');
+    const apply = dom.document.getElementById('vertex-paygo-update-apply');
+    const status = dom.document.getElementById('vertex-paygo-update-status');
+    assert.equal(row.hidden, false, 'the row is offered when the backend advertises the capability');
+    assert.equal(check.disabled, false);
+    assert.equal(apply.hidden, true, 'nothing to apply before a check');
+
+    await check.fire('click');
+    await settle();
+    await settle();
+    assert.equal(apply.hidden, false, 'a paired update becomes actionable');
+    assert.match(status.textContent, /v0\.5\.1/u);
+
+    await apply.fire('click');
+    await settle();
+    await settle();
+    assert.equal(confirmations.length, 1, 'replacing both components is confirmed first');
+    assert.match(confirmations[0].body, /v0\.5\.1/u);
+    assert.equal(confirmations[0].options.defaultResult, context.POPUP_RESULT.NEGATIVE);
+    assert.equal(starts, 0, 'declining the confirmation starts nothing');
+    assert.equal(apply.hidden, false, 'the offer survives a declined confirmation');
+    ui.destroy();
+});
