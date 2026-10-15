@@ -16,6 +16,9 @@ import {
     BRIDGE_LOG_TIMEOUT_MS,
     PREPARE_TIMEOUT_MS,
     PROTOCOL_VERSION,
+    UPDATE_CHECK_TIMEOUT_MS,
+    UPDATE_START_TIMEOUT_MS,
+    UPDATE_STATUS_TIMEOUT_MS,
     REQUIRED_TRANSPORT,
     SERVER_ROUTES,
 } from './constants.js';
@@ -336,6 +339,43 @@ export function createServerClient({ fetchImpl = globalThis.fetch, getRequestHea
                 proxyUrl,
                 proxySecret: data.proxySecret,
             };
+        },
+
+        async checkUpdate() {
+            const data = await fetchJson(fetchImpl, SERVER_ROUTES.UPDATE, {
+                method: 'GET',
+                headers: { ...getRequestHeaders(), Accept: 'application/json' },
+                cache: 'no-store',
+            }, UPDATE_CHECK_TIMEOUT_MS);
+            if (data?.ok !== true || typeof data.status !== 'string' || !Array.isArray(data.components)) {
+                throw new ServerPluginError('Server Plugin returned an invalid update check.', { code: 'INVALID_UPDATE_RESPONSE' });
+            }
+            return data;
+        },
+
+        async startUpdate() {
+            const data = await fetchJson(fetchImpl, SERVER_ROUTES.UPDATE, {
+                method: 'POST',
+                headers: { ...getRequestHeaders(), Accept: 'application/json', 'Content-Type': 'application/json' },
+                body: '{}',
+                cache: 'no-store',
+            }, UPDATE_START_TIMEOUT_MS);
+            if (data?.ok !== true || data.started !== true) {
+                throw new ServerPluginError('Server Plugin did not start the update.', { code: 'INVALID_UPDATE_RESPONSE' });
+            }
+            return data;
+        },
+
+        async readUpdateStatus() {
+            const data = await fetchJson(fetchImpl, SERVER_ROUTES.UPDATE_STATUS, {
+                method: 'GET',
+                headers: { ...getRequestHeaders(), Accept: 'application/json' },
+                cache: 'no-store',
+            }, UPDATE_STATUS_TIMEOUT_MS);
+            if (data?.ok !== true || typeof data.running !== 'boolean') {
+                throw new ServerPluginError('Server Plugin returned an invalid update status.', { code: 'INVALID_UPDATE_RESPONSE' });
+            }
+            return data;
         },
 
         async readLogs() {

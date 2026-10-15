@@ -10,7 +10,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createServerClient, parseLoopbackProxyUrl, ServerPluginError } from '../src/server-client.js';
-import { MAX_LOG_RESPONSE_BYTES, MAX_BRIDGE_LOG_RESPONSE_BYTES, PREPARE_TIMEOUT_MS } from '../src/constants.js';
+import { MAX_LOG_RESPONSE_BYTES, MAX_BRIDGE_LOG_RESPONSE_BYTES, PREPARE_TIMEOUT_MS, SERVER_ROUTES } from '../src/constants.js';
 
 function jsonResponse(data, { ok = true, status = 200 } = {}) {
     return { ok, status, json: async () => data };
@@ -260,4 +260,47 @@ test('an interrupted response body is reported as a timeout rather than invalid 
     }), { headers: { 'Content-Type': 'application/json' } }) });
     await assert.rejects(client.readOpenAiBridge(), error => error.code === 'TIMEOUT');
     await assert.rejects(client.readOpenAiBridgeLogs(), error => error.code === 'TIMEOUT');
+});
+
+test('update check, start, and status use authenticated no-store requests', async () => {
+    const requests = [];
+    const client = createServerClient({
+        getRequestHeaders: () => ({ 'X-CSRF-Token': 'fixture' }),
+        fetchImpl: async (url, options) => {
+            requests.push({ url, options });
+            if (options.method === 'POST') return jsonResponse({ ok: true, started: true }, { status: 202 });
+            if (url === SERVER_ROUTES.UPDATE_STATUS) {
+                return jsonResponse({ ok: true, running: false, lastResult: { status: 'updated', restartRequired: true } });
+            }
+            return jsonResponse({ ok: true, status: 'update-available', components: [{ name: 'frontend', status: 'update' }] });
+        },
+    });
+
+    const report = await client.checkUpdate();
+    assert.equal(report.status, 'update-available');
+    assert.equal(report.components.length, 1);
+    assert.equal(requests[0].url, SERVER_ROUTES.UPDATE);
+    assert.equal(requests[0].options.method, 'GET');
+    assert.equal(requests[0].options.cache, 'no-store');
+    assert.equal(requests[0].options.headers['X-CSRF-Token'], 'fixture');
+
+    await client.startUpdate();
+    assert.equal(requests[1].options.method, 'POST');
+    assert.equal(requests[1].options.headers['X-CSRF-Token'], 'fixture');
+
+    const status = await client.readUpdateStatus();
+    assert.equal(status.lastResult.status, 'updated');
+    assert.equal(requests[2].url, SERVER_ROUTES.UPDATE_STATUS);
+});
+
+test('update responses are validated before they are trusted', async () => {
+    const client = createServerClient({ fetchImpl: async () => jsonResponse({ ok: true }) });
+    await assert.rejects(client.checkUpdate(), error => error.code === 'INVALID_UPDATE_RESPONSE');
+    await assert.rejects(client.startUpdate(), error => error.code === 'INVALID_UPDATE_RESPONSE');
+    await assert.rejects(client.readUpdateStatus(), error => error.code === 'INVALID_UPDATE_RESPONSE');
+
+    const conflict = createServerClient({
+        fetchImpl: async () => jsonResponse({ error: true, code: 'UPDATER_IN_PROGRESS', message: 'An update is already running.' }, { ok: false, status: 409 }),
+    });
+    await assert.rejects(conflict.startUpdate(), error => error.code === 'HTTP_ERROR' && error.status === 409);
 });
