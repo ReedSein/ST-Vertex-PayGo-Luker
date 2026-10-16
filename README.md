@@ -1,5 +1,7 @@
 # ST Vertex AI PayGo 前端扩展
 
+> **Luker 测试通道 · 0.5.0-luker.1**：在宿主扩展管理器安装 `https://github.com/ReedSein/ST-Vertex-PayGo-Luker`，并在管理员面板安装配套后端 `https://github.com/ReedSein/ST-Vertex-PayGo-Server-Luker`。两仓库默认分支为 `test/luker-updates`，面板按分支提交配套更新。安装后重启宿主并刷新页面。下文的一键脚本指向作者正式仓库；本测试通道通过宿主界面安装与更新。
+
 为 **SillyTavern（酒馆）、Luker 以及 TauriTavern** 打造的一站式扩展！
 不仅为 Google Vertex AI 提供 **Standard / Flex / Priority** 服务层级调度，还新增支持了 Google AI Studio 的 **Standard / Flex** 模式，并提供极其详尽的**对话用量统计与费用实时估算**。
 

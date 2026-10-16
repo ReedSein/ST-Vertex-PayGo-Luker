@@ -1,5 +1,7 @@
 # PayGo 自动安装脚本
 
+> 本分支是 **0.5.0-luker.1** 测试通道。请使用 [README 中的宿主安装地址](README.md)，后续从 PayGo 面板配套更新。本文的一键命令仍获取作者正式版本。
+
 只安装 **ST-Vertex-PayGo 前端 + ST-Vertex-PayGo-Server 后端**。支持 Windows PowerShell、macOS、Linux、WSL 和 Android Termux 上已经能正常运行的 SillyTavern ≥ 1.16.0 / Luker ≥ 2.7.0。**不支持 TauriTavern，不包含其他插件。**
 
 当前发布版本为 **v0.5.0**（沿用预发布渠道）。SillyTavern / Luker 的前端与后端须一并更新至 **v0.5.0**，安装或更新完成后重启宿主并刷新页面。本版已包含 Google OpenAI 兼容桥接，无需选择开发分支。桥接首次使用时默认关闭；旧版内存状态不能迁移，升级后首次手动启用才开始保存并在重启时自动恢复。
