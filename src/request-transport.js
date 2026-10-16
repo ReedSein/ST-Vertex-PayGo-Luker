@@ -95,6 +95,9 @@ export function installRequestTransport({ context, stateProvider, target = globa
                 chatId: usageChatId, model: data.model, source: data.chat_completion_source,
                 tier: state.tier, stream: Boolean(data.stream), price: requestUsage.get(data).usagePrice,
             });
+        } catch (error) {
+            if (costToken) observe('failed', costToken);
+            throw error;
         } finally {
             requestStates.delete(data);
             requestUsage.delete(data);

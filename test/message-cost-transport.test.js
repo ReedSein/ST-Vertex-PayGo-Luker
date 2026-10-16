@@ -117,3 +117,20 @@ test('an abort after preparation marks the captured request failed and never sta
     assert.deepEqual(calls, [['prepared', token], ['failed', token]]);
     assert.equal(f.sent.length, 0);
 });
+
+test('a preparation failure marks the captured request failed without starting generation', async () => {
+    const failure = new Error('Google authentication is unavailable for this configuration.');
+    const calls = [];
+    const token = { id: 'prepare-failed' };
+    const f = setup({ prepare: () => { throw failure; }, messageCosts: {
+        capture: () => token,
+        prepared: () => calls.push('prepared'),
+        started: () => calls.push('started'),
+        failed: value => calls.push(['failed', value]),
+    } });
+    const payload = requestData();
+    f.hook(payload);
+    await assert.rejects(f.target.fetch(endpoint, { method: 'POST', body: JSON.stringify(payload) }), error => error === failure);
+    assert.deepEqual(calls, [['failed', token]]);
+    assert.equal(f.sent.length, 0);
+});

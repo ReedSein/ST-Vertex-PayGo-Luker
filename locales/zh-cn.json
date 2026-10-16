@@ -259,5 +259,7 @@
   "vertex_paygo.update.popup.title": "更新两个组件？",
   "vertex_paygo.update.popup.body": "前端扩展与服务端插件将一起替换为 {target}。原有文件会先备份，完成后需要重启宿主。",
   "vertex_paygo.update.popup.accept": "立即更新",
-  "vertex_paygo.update.popup.decline": "取消"
+  "vertex_paygo.update.popup.decline": "取消",
+  "vertex_paygo.server_error.csrf": "SillyTavern 拒绝了 CSRF 令牌（HTTP 403）。请刷新页面后重试。",
+  "vertex_paygo.server_error.http_non_json": "服务端插件请求失败（HTTP {status}）；服务器或反向代理未返回 JSON 错误详情。"
 }
