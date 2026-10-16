@@ -8,7 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPayGoUi } from '../src/ui.js';
-import { EXTENSION_ID } from '../src/constants.js';
+import { EXTENSION_ID, UPDATE_POLL_INTERVAL_MS } from '../src/constants.js';
 
 // Minimal host DOM adapter keeps this controller regression dependency-free.
 function createHostDom() {
@@ -186,6 +186,50 @@ function installHostDom(t, dom) {
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 0));
 
+function controlUpdatePoll(t) {
+    const timers = new Map();
+    const originalSet = globalThis.setTimeout;
+    const originalClear = globalThis.clearTimeout;
+    let nextId = -1;
+    t.mock.method(globalThis, 'setTimeout', (callback, delay, ...args) => {
+        if (delay !== UPDATE_POLL_INTERVAL_MS) return originalSet(callback, delay, ...args);
+        const id = nextId--;
+        timers.set(id, () => callback(...args));
+        return id;
+    });
+    t.mock.method(globalThis, 'clearTimeout', id => {
+        if (!timers.delete(id)) originalClear(id);
+    });
+    return {
+        get pending() { return timers.size; },
+        async tick() {
+            const callbacks = [...timers.values()];
+            timers.clear();
+            assert.ok(callbacks.length > 0, 'an update poll is scheduled');
+            for (const callback of callbacks) callback();
+            await settle();
+        },
+    };
+}
+
+function makeUpdaterUi(t, client = {}, context = createUpdaterContext()) {
+    const dom = createHostDom();
+    installHostDom(t, dom);
+    const clock = controlUpdatePoll(t);
+    const ui = createPayGoUi({ context, serverClient: {
+        checkHealth: async () => ({ capabilities: { updater: true } }),
+        checkUpdate: async () => ({ ok: true, status: 'update-available', components: [
+            { name: 'frontend', status: 'update', target: { tag: 'v0.5.1', commit: 'a'.repeat(40) } },
+            { name: 'server', status: 'update', target: { tag: 'v0.5.1', commit: 'b'.repeat(40) } },
+        ] }),
+        startUpdate: async () => ({ ok: true, started: true }),
+        readUpdateStatus: async () => ({ ok: true, running: false, lastResult: { status: 'updated' } }),
+        ...client,
+    } });
+    t.after(() => ui.destroy());
+    return { dom, ui, clock, get: id => dom.document.getElementById(`vertex-paygo-${id}`) };
+}
+
 test('the update row stays hidden while the backend does not advertise it', async t => {
     const dom = createHostDom();
     installHostDom(t, dom);
@@ -254,3 +298,137 @@ test('an available update is confirmed before anything is replaced', async t => 
     assert.equal(apply.hidden, false, 'the offer survives a declined confirmation');
     ui.destroy();
 });
+
+test('an accepted update polls progress and ends with a restart notice', async t => {
+    const calls = [];
+    const statuses = [
+        { ok: true, running: true, job: { phase: 'preparing' } },
+        { ok: true, running: false, lastResult: { status: 'updated', restartRequired: true } },
+    ];
+    const f = makeUpdaterUi(t, {
+        startUpdate: async () => { calls.push('start'); return { ok: true, started: true }; },
+        readUpdateStatus: async () => { calls.push('status'); return statuses.shift(); },
+    });
+    await f.ui.checkForUpdates();
+    const work = f.ui.applyUpdate();
+    await settle();
+    assert.equal(f.get('update-check').disabled, true);
+    await f.clock.tick();
+    assert.match(f.get('update-status').textContent, /downloading and verifying/u);
+    await f.clock.tick();
+    await work;
+    assert.deepEqual(calls, ['start', 'status', 'status']);
+    assert.match(f.get('update-status').textContent, /Restart the host/u);
+    assert.equal(f.get('update-check').disabled, false);
+    assert.equal(f.clock.pending, 0);
+});
+
+test('an update that became current during confirmation reports no replacement', async t => {
+    const f = makeUpdaterUi(t, {
+        readUpdateStatus: async () => ({ ok: true, running: false, lastResult: { status: 'no-change' } }),
+    });
+    await f.ui.checkForUpdates();
+    const work = f.ui.applyUpdate();
+    await settle();
+    await f.clock.tick();
+    await work;
+    assert.match(f.get('update-status').textContent, /Both components are current/u);
+    assert.equal(f.get('update-apply').hidden, true);
+});
+
+test('a failed update displays its cause and allows a fresh check and retry', async t => {
+    let starts = 0;
+    const f = makeUpdaterUi(t, {
+        startUpdate: async () => { starts++; return { ok: true, started: true }; },
+        readUpdateStatus: async () => ({ ok: true, running: false, lastResult: starts === 1
+            ? { status: 'failed', code: 'UPDATER_GIT_FAILED', message: 'fixture download failed' }
+            : { status: 'updated' } }),
+    });
+    await f.ui.checkForUpdates();
+    const first = f.ui.applyUpdate();
+    await settle();
+    await f.clock.tick();
+    await first;
+    assert.match(f.get('update-status').textContent, /fixture download failed/u);
+    assert.equal(f.get('update-check').disabled, false);
+    await f.ui.checkForUpdates();
+    const retry = f.ui.applyUpdate();
+    await settle();
+    await f.clock.tick();
+    await retry;
+    assert.equal(starts, 2);
+    assert.match(f.get('update-status').textContent, /Restart the host/u);
+});
+
+test('an open confirmation prevents a second confirmation or start', async t => {
+    const resolvers = [];
+    const context = createUpdaterContext();
+    context.Popup.show.confirm = () => new Promise(resolve => resolvers.push(resolve));
+    t.after(() => { for (const resolve of resolvers) resolve(context.POPUP_RESULT.NEGATIVE); });
+    let starts = 0;
+    const f = makeUpdaterUi(t, { startUpdate: async () => { starts++; } }, context);
+    await f.ui.checkForUpdates();
+    const first = f.ui.applyUpdate();
+    const second = f.ui.applyUpdate();
+    assert.equal(resolvers.length, 1);
+    assert.equal(f.get('update-apply').disabled, true);
+    resolvers[0](context.POPUP_RESULT.NEGATIVE);
+    await Promise.all([first, second]);
+    assert.equal(starts, 0);
+    assert.equal(f.get('update-apply').disabled, false);
+});
+
+test('destroying the panel releases its scheduled update poll', async t => {
+    const f = makeUpdaterUi(t);
+    await f.ui.checkForUpdates();
+    const work = f.ui.applyUpdate();
+    await settle();
+    assert.equal(f.clock.pending, 1);
+    f.ui.destroy();
+    assert.equal(f.clock.pending, 0);
+    await work;
+});
+
+test('a late status response cannot reattach a destroyed panel', async t => {
+    let finishStatus;
+    const f = makeUpdaterUi(t, { readUpdateStatus: () => new Promise(resolve => { finishStatus = resolve; }) });
+    await f.ui.checkForUpdates();
+    const work = f.ui.applyUpdate();
+    await settle();
+    await f.clock.tick();
+    f.ui.destroy();
+    finishStatus({ ok: true, running: false, lastResult: { status: 'updated' } });
+    await work;
+    assert.equal(f.get('settings').parentElement === null, true, 'the destroyed panel stays detached');
+    assert.equal(f.clock.pending, 0);
+});
+
+test('a confirmation resolved after destruction cannot start an update', async t => {
+    let confirm;
+    let starts = 0;
+    const context = createUpdaterContext();
+    context.Popup.show.confirm = () => new Promise(resolve => { confirm = resolve; });
+    const f = makeUpdaterUi(t, { startUpdate: async () => { starts++; } }, context);
+    await f.ui.checkForUpdates();
+    const work = f.ui.applyUpdate();
+    f.ui.destroy();
+    confirm(context.POPUP_RESULT.AFFIRMATIVE);
+    await work;
+    assert.equal(starts, 0);
+    assert.equal(f.clock.pending, 0);
+});
+
+for (const failure of ['start', 'status']) {
+    test(`an update ${failure} request failure releases the controls`, async t => {
+        const fail = async () => { throw new Error('fixture request failed'); };
+        const f = makeUpdaterUi(t, failure === 'start' ? { startUpdate: fail } : { readUpdateStatus: fail });
+        await f.ui.checkForUpdates();
+        const work = f.ui.applyUpdate();
+        await settle();
+        if (failure === 'status') await f.clock.tick();
+        await work;
+        assert.match(f.get('update-status').textContent, /fixture request failed/u);
+        assert.equal(f.get('update-check').disabled, false);
+        assert.equal(f.clock.pending, 0);
+    });
+}

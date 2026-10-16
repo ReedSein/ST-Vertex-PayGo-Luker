@@ -347,7 +347,7 @@ export function createServerClient({ fetchImpl = globalThis.fetch, getRequestHea
                 headers: { ...getRequestHeaders(), Accept: 'application/json' },
                 cache: 'no-store',
             }, UPDATE_CHECK_TIMEOUT_MS);
-            if (data?.ok !== true || typeof data.status !== 'string' || !Array.isArray(data.components)) {
+            if (data?.ok !== true || !['update-available', 'up-to-date', 'blocked'].includes(data.status) || !Array.isArray(data.components)) {
                 throw new ServerPluginError('Server Plugin returned an invalid update check.', { code: 'INVALID_UPDATE_RESPONSE' });
             }
             return data;

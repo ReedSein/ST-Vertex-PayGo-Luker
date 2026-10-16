@@ -221,7 +221,9 @@ export function createPayGoUi({
     // idle, checking, available, uptodate, blocked, running, done or failed.
     let updateState = { status: 'idle' };
     let updatePending = false;
-    let updatePollCancelled = false;
+    let destroyed = false;
+    let updatePollTimer = null;
+    let finishUpdatePoll = null;
     const reconcileGuard = createReconcileGuard();
 
     const popup = context.Popup;
@@ -403,6 +405,7 @@ export function createPayGoUi({
     }
 
     function render() {
+        if (destroyed) return;
         placementControl.render();
         const aiStudio = getSource() === AI_STUDIO_SOURCE;
         // One panel, one controller, and one set of listeners serve both sources.
@@ -489,12 +492,13 @@ export function createPayGoUi({
     }
 
     async function checkForUpdates() {
-        if (updatePending || updateState.status === 'running') return;
+        if (destroyed || updatePending || updateState.status === 'running') return;
         updatePending = true;
         setUpdaterState({ status: 'checking' });
         recordClientEvent('info', 'update.check_started', { phase: 'started' });
         try {
             const report = await serverClient.checkUpdate();
+            if (destroyed) return;
             const status = report.status === 'update-available' ? 'available'
                 : report.status === 'blocked' ? 'blocked' : 'uptodate';
             setUpdaterState({ status, components: report.components });
@@ -508,10 +512,21 @@ export function createPayGoUi({
         }
     }
 
+    function waitForUpdatePoll() {
+        return new Promise(resolve => {
+            finishUpdatePoll = resolve;
+            updatePollTimer = setTimeout(() => {
+                updatePollTimer = null;
+                finishUpdatePoll = null;
+                resolve();
+            }, UPDATE_POLL_INTERVAL_MS);
+        });
+    }
+
     async function pollUpdateUntilSettled() {
         for (;;) {
-            await new Promise(resolve => setTimeout(resolve, UPDATE_POLL_INTERVAL_MS));
-            if (updatePollCancelled) return;
+            await waitForUpdatePoll();
+            if (destroyed) return;
             let status;
             try {
                 status = await serverClient.readUpdateStatus();
@@ -519,6 +534,7 @@ export function createPayGoUi({
                 setUpdaterState({ status: 'failed', message: localizeError(localize, error) });
                 return;
             }
+            if (destroyed) return;
             if (status.running) {
                 setUpdaterState({ status: 'running', phase: status.job?.phase ?? 'checking' });
                 continue;
@@ -537,25 +553,26 @@ export function createPayGoUi({
     }
 
     async function applyUpdate() {
-        if (updatePending || updateState.status !== 'available') return;
+        if (destroyed || updatePending || updateState.status !== 'available' || !healthState.updaterAvailable) return;
         const changing = updateState.components?.find(component => component.status === 'update');
         const target = changing?.target?.tag ?? (changing?.target?.commit ?? '').slice(0, 7);
-        const confirmed = await popup.show.confirm(
-            localize('vertex_paygo.update.popup.title'),
-            localize('vertex_paygo.update.popup.body', { target }),
-            {
-                okButton: localize('vertex_paygo.update.popup.accept'),
-                cancelButton: localize('vertex_paygo.update.popup.decline'),
-                defaultResult: popupResult.NEGATIVE,
-            },
-        );
-        if (confirmed !== popupResult.AFFIRMATIVE) return;
-
         updatePending = true;
-        setUpdaterState({ status: 'running', phase: 'checking' });
-        recordClientEvent('info', 'update.start_requested', { phase: 'started' });
+        render();
         try {
+            const confirmed = await popup.show.confirm(
+                localize('vertex_paygo.update.popup.title'),
+                localize('vertex_paygo.update.popup.body', { target }),
+                {
+                    okButton: localize('vertex_paygo.update.popup.accept'),
+                    cancelButton: localize('vertex_paygo.update.popup.decline'),
+                    defaultResult: popupResult.NEGATIVE,
+                },
+            );
+            if (destroyed || confirmed !== popupResult.AFFIRMATIVE) return;
+            setUpdaterState({ status: 'running', phase: 'checking' });
+            recordClientEvent('info', 'update.start_requested', { phase: 'started' });
             await serverClient.startUpdate();
+            if (destroyed) return;
             await pollUpdateUntilSettled();
         } catch (error) {
             recordClientEvent('error', 'update.start_failed', { phase: 'failed', ...getSafeErrorContext(error) });
@@ -1133,7 +1150,15 @@ export function createPayGoUi({
     void refreshHealth();
 
     return {
-        destroy() { updatePollCancelled = true; placementControl.destroy(); controls.root.remove(); },
+        destroy() {
+            destroyed = true;
+            if (updatePollTimer !== null) clearTimeout(updatePollTimer);
+            updatePollTimer = null;
+            finishUpdatePoll?.();
+            finishUpdatePoll = null;
+            placementControl.destroy();
+            controls.root.remove();
+        },
         getState: () => ({ ...state }),
         refreshHealth,
         viewLogs: () => runLogAction('view'),

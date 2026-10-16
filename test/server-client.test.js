@@ -303,4 +303,8 @@ test('update responses are validated before they are trusted', async () => {
         fetchImpl: async () => jsonResponse({ error: true, code: 'UPDATER_IN_PROGRESS', message: 'An update is already running.' }, { ok: false, status: 409 }),
     });
     await assert.rejects(conflict.startUpdate(), error => error.code === 'HTTP_ERROR' && error.status === 409);
+    const unknown = createServerClient({
+        fetchImpl: async () => jsonResponse({ ok: true, status: 'unexpected-status', components: [] }),
+    });
+    await assert.rejects(unknown.checkUpdate(), error => error.code === 'INVALID_UPDATE_RESPONSE');
 });
