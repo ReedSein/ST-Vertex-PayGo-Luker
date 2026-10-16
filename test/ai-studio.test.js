@@ -69,7 +69,7 @@ test('AI Studio hook uses the same ticket preparation with a source-specific pay
             stateProvider: () => ({ tier: TIER.FLEX, paygoOnly: true }),
             origin: 'http://localhost:8000',
             serverClient: { prepare: async value => {
-                assert.match(data.reverse_proxy, /\/rejected$/u);
+                assert.match(data.reverse_proxy, /^vertex-paygo-blocked:/u);
                 payload = value;
                 return { proxyUrl: 'http://127.0.0.1:1234/proxy/test', proxySecret: 'disposable' };
             } },
@@ -85,17 +85,17 @@ test('AI Studio Standard and Flex failures cannot fall back to the native route'
     const data = () => ({ chat_completion_source: source, model: 'gemini-2.5-pro' });
     const serverClient = { prepare: async () => { throw new Error('unavailable'); } };
     const native = data();
-    await createRequestHook({ stateProvider: () => ({ tier: TIER.STANDARD, paygoOnly: true }), serverClient,
-        origin: 'http://localhost:8000', logger: { error() {} } })(native);
-    assert.match(native.reverse_proxy, /\/rejected$/u);
+    await assert.rejects(createRequestHook({ stateProvider: () => ({ tier: TIER.STANDARD, paygoOnly: true }), serverClient,
+        origin: 'http://localhost:8000', logger: { error() {} } })(native), /unavailable/);
+    assert.match(native.reverse_proxy, /^vertex-paygo-blocked:/u);
     for (const overrides of [{}, { model: 'gemma-3' }, { reverse_proxy: 'https://custom.invalid' }]) {
         const request = { ...data(), ...overrides };
         const errors = [];
-        await createRequestHook({
+        await assert.rejects(createRequestHook({
             stateProvider: () => ({ tier: TIER.FLEX }), serverClient,
             origin: 'http://localhost:8000', notifyError: message => errors.push(message), logger: { error() {} },
-        })(request);
-        assert.match(request.reverse_proxy, /\/rejected$/u);
+        })(request), error => error instanceof Error && Boolean(error.message));
+        assert.match(request.reverse_proxy, /^vertex-paygo-blocked:/u);
         assert.equal(errors.length, 1);
     }
 });

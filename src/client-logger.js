@@ -82,7 +82,8 @@ export function normalizeClientLogEntry(level, event, context = {}) {
 
 export function getSafeErrorContext(error) {
     const context = {};
-    const errorCode = normalizeString(error?.code ?? error?.name, CODE_PATTERN);
+    const errorCode = normalizeString(error?.serverCode, CODE_PATTERN)
+        ?? normalizeString(error?.code ?? error?.name, CODE_PATTERN);
     if (errorCode) context.errorCode = errorCode;
     const statusCode = normalizeInteger(error?.status, 'statusCode');
     if (statusCode !== undefined) context.statusCode = statusCode;

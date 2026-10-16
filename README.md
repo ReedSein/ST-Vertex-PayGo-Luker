@@ -1,6 +1,6 @@
 # ST Vertex AI PayGo 前端扩展
 
-> **Luker 测试通道 · 0.5.0-luker.1**：在宿主扩展管理器安装 `https://github.com/ReedSein/ST-Vertex-PayGo-Luker`，并在管理员面板安装配套后端 `https://github.com/ReedSein/ST-Vertex-PayGo-Server-Luker`。两仓库默认分支为 `test/luker-updates`，面板按分支提交配套更新。安装后重启宿主并刷新页面。下文的一键脚本指向作者正式仓库；本测试通道通过宿主界面安装与更新。
+> **Luker 测试通道 · 0.5.1-luker.1**：在宿主扩展管理器安装 `https://github.com/ReedSein/ST-Vertex-PayGo-Luker`，并在管理员面板安装配套后端 `https://github.com/ReedSein/ST-Vertex-PayGo-Server-Luker`。两仓库默认分支为 `test/luker-updates`，面板按分支提交配套更新。安装后重启宿主并刷新页面。下文的一键脚本指向作者正式仓库；本测试通道通过宿主界面安装与更新。
 
 为 **SillyTavern（酒馆）、Luker 以及 TauriTavern** 打造的一站式扩展！
 不仅为 Google Vertex AI 提供 **Standard / Flex / Priority** 服务层级调度，还新增支持了 Google AI Studio 的 **Standard / Flex** 模式，并提供极其详尽的**对话用量统计与费用实时估算**。
@@ -11,7 +11,9 @@
 
 ## Google OpenAI 兼容桥接 · v0.5.0
 
-Google OpenAI 兼容桥接已在 **v0.5.0** 正式提供。SillyTavern / Luker 用户请将前端扩展与配套后端一并更新至 **v0.5.0**，随后重启宿主并刷新页面；旧后端缺少桥接能力时，界面会提示升级。
+Google OpenAI 兼容桥接已在 **v0.5.0** 正式提供。SillyTavern / Luker 用户请将前端扩展与配套后端一并更新至 **v0.5.1**，随后重启宿主并刷新页面；旧后端缺少桥接能力时，界面会提示升级。
+
+**v0.5.1 请求失败诊断修复**：参数校验、反代冲突或准备请求失败会立即阻止生成并显示具体原因，保留服务端错误码和 HTTP 状态，避免二次 CSRF 错误覆盖原始问题。
 
 **仅支持 SillyTavern / Luker，不支持 TauriTavern。** 此限制只针对桥接功能，已有的 TauriTavern 原生层级与费用功能保持可用。
 
@@ -106,7 +108,7 @@ Debug 只开放桥接数据接口的本机跨域访问，不开放 ST 管理接�
 
 **面板内更新**：前后端均由宿主界面安装的用户，管理员也可直接在扩展面板中检查并执行配套更新：两个组件一起更新到与命令行相同的发布版本，保留跟踪分支、保护本地修改、替换前备份。更新在宿主运行中完成，不需要系统 Git 或 npm；完成后需重启宿主并刷新页面加载新版本。后端版本过旧或当前账号不是管理员时，面板不显示该入口。
 
-当前前端版本为 **v0.5.0**。SillyTavern / Luker 升级时须同步更新前后端至 **v0.5.0**，重启宿主并刷新页面。不同客户端环境的安装需求如下：
+当前前端版本为 **v0.5.1**。SillyTavern / Luker 升级时须同步更新前后端至 **v0.5.1**，重启宿主并刷新页面。不同客户端环境的安装需求如下：
 
 | 客户端程序 | 版本及运行环境 | 需要安装哪些组件？ | 底层请求通道 |
 | :--- | :--- | :--- | :--- |

@@ -24,11 +24,13 @@ import {
 } from './constants.js';
 
 export class ServerPluginError extends Error {
-    constructor(message, { code = 'SERVER_PLUGIN_ERROR', status, cause } = {}) {
+    constructor(message, { code = 'SERVER_PLUGIN_ERROR', status, serverCode, responseFormat, cause } = {}) {
         super(message, { cause });
         this.name = 'ServerPluginError';
         this.code = code;
         this.status = status;
+        this.serverCode = serverCode;
+        this.responseFormat = responseFormat;
     }
 }
 
@@ -64,12 +66,64 @@ export function parseLoopbackProxyUrl(value) {
     return url.toString();
 }
 
+// Error pages can come from SillyTavern or an upstream reverse proxy. Read only
+// a bounded prefix and never expose arbitrary HTML in a user-facing message.
+const MAX_ERROR_RESPONSE_BYTES = 16 * 1024;
+
+async function readHttpError(response) {
+    let data;
+    let text = '';
+    try {
+        if (response.body?.getReader) {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let remaining = MAX_ERROR_RESPONSE_BYTES;
+            try {
+                while (remaining > 0) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    const prefix = value.subarray(0, remaining);
+                    text += decoder.decode(prefix, { stream: true });
+                    remaining -= prefix.byteLength;
+                }
+                text += decoder.decode();
+            } finally {
+                await reader.cancel();
+                reader.releaseLock();
+            }
+            try { data = JSON.parse(text); } catch { /* HTML or other error body. */ }
+        } else if (typeof response.text === 'function') {
+            text = String(await response.text()).slice(0, MAX_ERROR_RESPONSE_BYTES);
+            try { data = JSON.parse(text); } catch { /* Non-JSON error body. */ }
+        } else {
+            // Support minimal host adapters that expose only json().
+            data = await response.json();
+        }
+    } catch (cause) {
+        if (cause?.name === 'AbortError') throw cause;
+        // An unreadable error body must not hide the HTTP failure status.
+    }
+    if (response.status === 403 && /\bInvalid CSRF token\b/iu.test(text)) {
+        return new ServerPluginError('SillyTavern rejected the CSRF token (HTTP 403). Refresh the page and try again.', {
+            code: 'CSRF_REJECTED', status: response.status,
+        });
+    }
+    const message = typeof data?.message === 'string' && data.message.trim()
+        ? data.message : `Server Plugin request failed (HTTP ${response.status}); no JSON error details were returned.`;
+    return new ServerPluginError(message, {
+        code: 'HTTP_ERROR', status: response.status,
+        serverCode: typeof data?.code === 'string' ? data.code : undefined,
+        responseFormat: data === undefined ? 'non-json' : 'json',
+    });
+}
+
 async function fetchJson(fetchImpl, url, options, timeoutMs) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
         const response = await fetchImpl(url, { ...options, signal: controller.signal });
+        if (!response.ok) throw await readHttpError(response);
         let data;
         try {
             data = await response.json();
@@ -82,10 +136,6 @@ async function fetchJson(fetchImpl, url, options, timeoutMs) {
             });
         }
 
-        if (!response.ok) {
-            const message = typeof data?.message === 'string' ? data.message : `Server Plugin request failed (${response.status}).`;
-            throw new ServerPluginError(message, { code: 'HTTP_ERROR', status: response.status });
-        }
         return data;
     } catch (error) {
         if (error instanceof ServerPluginError) {
