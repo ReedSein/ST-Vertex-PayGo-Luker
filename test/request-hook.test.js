@@ -38,9 +38,9 @@ test('Standard rejects custom reverse proxies before collecting usage', async ()
         serverClient: { prepare: async () => prepares++ },
         origin: ORIGIN,
     });
-    await hook(data);
+    await assert.rejects(hook(data), { code: 'CUSTOM_REVERSE_PROXY_CONFLICT' });
     assert.equal(prepares, 0);
-    assert.match(data.reverse_proxy, /\/rejected$/);
+    assert.match(data.reverse_proxy, /^vertex-paygo-blocked:/);
     assert.equal(Object.hasOwn(data, 'proxy_password'), true);
 });
 
@@ -98,7 +98,7 @@ test('installs the failure sink before awaiting prepare and replaces it only aft
     });
 
     const pending = hook(data);
-    assert.equal(data.reverse_proxy, 'http://st.local:8000/api/plugins/vertex-paygo/rejected');
+    assert.equal(data.reverse_proxy, 'vertex-paygo-blocked://request');
     assert.equal(data.proxy_password, 'temporary-block-secret');
 
     resolvePrepare({ proxyUrl: `http://127.0.0.1:32145/proxy/${'a'.repeat(32)}`, proxySecret: 'proxy-secret-value' });
@@ -129,8 +129,8 @@ test('prepare failure retains the failure sink and reports a visible error', asy
         logger: { error() {} },
         secretFactory: () => 'blocked',
     });
-    await hook(data);
-    assert.match(data.reverse_proxy, /\/rejected$/);
+    await assert.rejects(hook(data), /Plugin unavailable/);
+    assert.match(data.reverse_proxy, /^vertex-paygo-blocked:/);
     assert.equal(data.proxy_password, 'blocked');
     assert.match(errors[0], /not sent to Google/);
 });
@@ -149,9 +149,9 @@ test('invalid tier/region state is blocked before prepare', async () => {
             : key === 'vertex_paygo.tier.flex' ? 'Flex（灵活）' : key,
         logger: { error() {} },
     });
-    await hook(data);
+    await assert.rejects(hook(data), { code: 'TIER_REQUIRES_GLOBAL', message: 'Flex（灵活） 必须使用 global' });
     assert.equal(prepares, 0);
-    assert.match(data.reverse_proxy, /\/rejected$/);
+    assert.match(data.reverse_proxy, /^vertex-paygo-blocked:/);
     assert.equal(errors[0], 'Flex（灵活） 必须使用 global');
 });
 
@@ -191,9 +191,9 @@ test('pre-existing custom Vertex reverse proxy conflicts fail closed', async () 
         logger: { error() {} },
         secretFactory: () => 'blocked-conflict',
     });
-    await hook(data);
+    await assert.rejects(hook(data), { code: 'CUSTOM_REVERSE_PROXY_CONFLICT' });
     assert.equal(prepares, 0);
-    assert.equal(data.reverse_proxy, 'http://st.local:8000/api/plugins/vertex-paygo/rejected');
+    assert.equal(data.reverse_proxy, 'vertex-paygo-blocked://request');
     assert.equal(data.proxy_password, 'blocked-conflict');
     assert.match(errors[0], /custom Google reverse proxy/i);
 });
@@ -228,6 +228,28 @@ test('failure sink itself cannot throw and retains a non-network URL', () => {
     assert.doesNotThrow(() => installFailureSink(data, 'not a URL', () => { throw new Error('rng failed'); }));
     assert.equal(data.reverse_proxy, 'vertex-paygo-blocked://request');
     assert.equal(data.proxy_password, 'blocked');
+});
+
+test('failure sink never calls the ST HTTP server even with a valid origin', async () => {
+    const data = {};
+    installFailureSink(data, ORIGIN);
+    assert.equal(new URL(data.reverse_proxy).protocol, 'vertex-paygo-blocked:');
+    // Model the host appending its Google path before the server-side fetch.
+    await assert.rejects(fetch(`${data.reverse_proxy}/v1/publishers/google/models/gemini-2.5-pro:generateContent`, {
+        method: 'POST', body: '{}',
+    }), error => error.cause?.message === 'unknown scheme');
+});
+
+test('notification and logging failures cannot replace the preparation error', async () => {
+    const failure = Object.assign(new Error('The requested Google credential was not found.'), { code: 'EXPLICIT_SECRET_NOT_FOUND' });
+    const hook = createRequestHook({
+        stateProvider: () => ({ tier: TIER.STANDARD }),
+        serverClient: { prepare: async () => { throw failure; } },
+        origin: ORIGIN,
+        notifyError: () => { throw new Error('notification failed'); },
+        logger: { error() { throw new Error('logging failed'); }, event() { throw new Error('event failed'); } },
+    });
+    await assert.rejects(hook(vertexData()), error => error === failure);
 });
 
 test('failure sink does not propagate hostile property setters', () => {
@@ -282,7 +304,7 @@ test('blocked and failed preparations emit stable error metadata only', async ()
             error() {},
         },
     });
-    await blockedHook(vertexData({ model: 'claude-3-7-sonnet' }));
+    await assert.rejects(blockedHook(vertexData({ model: 'claude-3-7-sonnet' })), { code: 'PAYGO_REQUIRES_GEMINI' });
     assert.equal(blockedEvents[1].event, 'request.blocked');
     assert.equal(blockedEvents[1].context.model, 'claude-3-7-sonnet');
     assert.equal(blockedEvents[1].context.errorCode, 'PAYGO_REQUIRES_GEMINI');
@@ -305,7 +327,7 @@ test('blocked and failed preparations emit stable error metadata only', async ()
             error() {},
         },
     });
-    await failedHook(vertexData());
+    await assert.rejects(failedHook(vertexData()), { code: 'UNAVAILABLE', status: 503 });
     const failure = failedEvents.at(-1);
     assert.equal(failure.event, 'request.prepare_failed');
     assert.equal(failure.context.errorCode, 'UNAVAILABLE');

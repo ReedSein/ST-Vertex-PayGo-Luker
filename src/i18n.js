@@ -123,6 +123,8 @@ export const MESSAGES = Object.freeze({
     'vertex_paygo.tauritavern.finish': 'Parameters are saved automatically for each API source; close the dialog when done. Preserve unrelated parameters. If these fields are missing, update TauriTavern to 2.1.0 or later. You can disable or uninstall this extension in Extensions.',
     'vertex_paygo.tauritavern.close': 'Got it',
     'vertex_paygo.costs.recording_unavailable': 'This request could not be added to the usage ledger. Conversation costs will be incomplete.',
+    'vertex_paygo.server_error.csrf': 'SillyTavern rejected the CSRF token (HTTP 403). Refresh the page and try again.',
+    'vertex_paygo.server_error.http_non_json': 'Server Plugin request failed (HTTP {status}); the server or reverse proxy returned no JSON error details.',
     'vertex_paygo.title': 'Vertex AI PayGo',
     'vertex_paygo.ai_studio.title': 'Google AI Studio Flex',
     'vertex_paygo.ai_studio.guidance': 'Flex uses discounted token pricing and may take longer. A paid Gemini API account is required. Failed Flex requests will not automatically switch to Standard.',
@@ -306,6 +308,7 @@ export function localizeError(
     { protocolVersion = PROTOCOL_VERSION, transport = REQUIRED_TRANSPORT } = {},
 ) {
     const keyByCode = {
+        CSRF_REJECTED: 'vertex_paygo.server_error.csrf',
         INVALID_PROXY_URL: 'vertex_paygo.server_error.invalid_proxy_url',
         UNSAFE_PROXY_URL: 'vertex_paygo.server_error.unsafe_proxy_url',
         INVALID_RESPONSE: 'vertex_paygo.server_error.invalid_response',
@@ -320,8 +323,10 @@ export function localizeError(
     };
 
     if (error?.code === 'HTTP_ERROR') {
+        if (error.responseFormat === 'non-json') return localize('vertex_paygo.server_error.http_non_json', { status: error.status });
+        const details = [error.status ? `HTTP ${error.status}` : '', error.serverCode].filter(Boolean).join(' / ');
         return localize('vertex_paygo.server_error.http', {
-            message: error instanceof Error ? error.message : String(error),
+            message: `${error instanceof Error ? error.message : String(error)}${details ? ` (${details})` : ''}`,
         });
     }
 

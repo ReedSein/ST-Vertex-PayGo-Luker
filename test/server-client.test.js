@@ -261,3 +261,58 @@ test('an interrupted response body is reported as a timeout rather than invalid 
     await assert.rejects(client.readOpenAiBridge(), error => error.code === 'TIMEOUT');
     await assert.rejects(client.readOpenAiBridgeLogs(), error => error.code === 'TIMEOUT');
 });
+
+test('prepare preserves server error code and HTTP status', async () => {
+    const client = createServerClient({ fetchImpl: async () => new Response(JSON.stringify({
+        code: 'GOOGLE_CREDENTIALS_INVALID', message: 'Credential parsing failed.',
+    }), { status: 422 }) });
+    await assert.rejects(client.prepare({}), error => error.code === 'HTTP_ERROR'
+        && error.serverCode === 'GOOGLE_CREDENTIALS_INVALID' && error.status === 422
+        && error.message === 'Credential parsing failed.');
+});
+
+test('only explicit CSRF rejection is diagnosed as CSRF; other HTML errors retain HTTP status', async () => {
+    const csrf = createServerClient({ fetchImpl: async () => new Response(
+        '<html><pre>Invalid CSRF token. Please refresh the page and try again.</pre></html>', { status: 403 }) });
+    await assert.rejects(csrf.prepare({}), error => error.code === 'CSRF_REJECTED'
+        && error.status === 403 && /HTTP 403/u.test(error.message) && !error.message.includes('<html>'));
+    for (const status of [403, 404, 502]) {
+        const client = createServerClient({ fetchImpl: async () => new Response('<html>Private proxy diagnostics</html>', { status }) });
+        await assert.rejects(client.prepare({}), error => error.code === 'HTTP_ERROR'
+            && error.status === status && error.message.includes(String(status))
+            && !error.message.includes('Private proxy diagnostics'));
+    }
+});
+
+test('error page inspection cancels the body after a bounded prefix', async () => {
+    let cancelled = false;
+    let reads = 0;
+    const client = createServerClient({ fetchImpl: async () => new Response(new ReadableStream({
+        pull(controller) { reads++; controller.enqueue(new Uint8Array(4096).fill(32)); },
+        cancel() { cancelled = true; },
+    }), { status: 502 }) });
+    await assert.rejects(client.prepare({}), error => error.code === 'HTTP_ERROR' && error.status === 502);
+    assert.equal(cancelled, true);
+    assert.ok(reads <= 5);
+});
+
+test('prepare reads fresh authentication headers for every request', async () => {
+    const tokens = [];
+    let token = 'old';
+    const client = createServerClient({ getRequestHeaders: () => ({ 'X-CSRF-Token': token }),
+        fetchImpl: async (_url, options) => {
+            tokens.push(options.headers['X-CSRF-Token']);
+            return jsonResponse({ message: 'Blocked.' }, { ok: false, status: 400 });
+        } });
+    await assert.rejects(client.prepare({}));
+    token = 'new';
+    await assert.rejects(client.prepare({}));
+    assert.deepEqual(tokens, ['old', 'new']);
+});
+
+test('an interrupted HTTP error body still reports timeout', async () => {
+    const client = createServerClient({ fetchImpl: async () => new Response(new ReadableStream({
+        start(controller) { controller.error(new DOMException('Aborted', 'AbortError')); },
+    }), { status: 403 }) });
+    await assert.rejects(client.prepare({}), error => error.code === 'TIMEOUT');
+});

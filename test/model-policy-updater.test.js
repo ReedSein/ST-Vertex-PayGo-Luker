@@ -405,12 +405,12 @@ test('an AI Studio model removed by the repository is blocked by reconciliation 
     assert.equal(plan.type, 'conflict');
     assert.equal(plan.validation.code, 'MODEL_UNSUPPORTED');
     const data = { chat_completion_source: AI_STUDIO_SOURCE, model, stream: true };
-    await createRequestHook({
+    await assert.rejects(createRequestHook({
         stateProvider: () => state,
         serverClient: { prepare: async () => assert.fail('retired model must not reach prepare') },
         origin: 'http://localhost:8000', logger: { error() {} },
-    })(data);
-    assert.match(data.reverse_proxy, /\/rejected$/u);
+    })(data), { code: 'MODEL_UNSUPPORTED' });
+    assert.match(data.reverse_proxy, /^vertex-paygo-blocked:/u);
 });
 
 test('legacy Vertex-only responses retain and cache a previously fetched AI Studio roster', async () => {

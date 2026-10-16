@@ -6,7 +6,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-import { AI_STUDIO_SOURCE, isGoogleSource, PROTOCOL_VERSION, SERVER_ROUTES, VERTEX_SOURCE } from './constants.js';
+import { AI_STUDIO_SOURCE, isGoogleSource, PROTOCOL_VERSION, VERTEX_SOURCE } from './constants.js';
 import { getSafeErrorContext } from './client-logger.js';
 import { createLocalizer, localizeError, localizeSupport, localizeValidation } from './i18n.js';
 import { requiresPlugin, validatePluginState } from './state-machine.js';
@@ -18,7 +18,15 @@ export function createEphemeralSecret() {
     return `blocked-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-export function installFailureSink(generateData, origin, secretFactory = createEphemeralSecret) {
+export class PayGoRequestError extends Error {
+    constructor(message, code = 'PAYGO_REQUEST_BLOCKED', options) {
+        super(message, options);
+        this.name = 'PayGoRequestError';
+        this.code = code;
+    }
+}
+
+export function installFailureSink(generateData, _origin, secretFactory = createEphemeralSecret) {
     // These assignments are the final safety net and must happen before any
     // operation that can throw. Node fetch rejects this private scheme without
     // opening a network connection.
@@ -34,11 +42,8 @@ export function installFailureSink(generateData, origin, secretFactory = createE
         // See comment above.
     }
 
-    try {
-        generateData.reverse_proxy = new URL(SERVER_ROUTES.REJECTED, origin).toString();
-    } catch {
-        // Keep the non-network failure URL.
-    }
+    // Never point this fallback at the ST HTTP server: its global CSRF gate
+    // would hide the preparation error behind an unauthenticated backend POST.
     try {
         generateData.proxy_password = String(secretFactory()) || 'blocked';
     } catch {
@@ -136,15 +141,7 @@ export function createRequestHook({
 
         try {
             if (existingReverseProxy) {
-                notifyError(localize('vertex_paygo.hook.proxy_conflict'));
-                recordClientEvent(logger, 'warn', 'request.blocked', {
-                    ...logContext,
-                    phase: 'blocked',
-                    errorCode: 'CUSTOM_REVERSE_PROXY_CONFLICT',
-                    durationMs: Date.now() - startedAt,
-                });
-                logger.error('[Vertex PayGo] Request blocked: CUSTOM_REVERSE_PROXY_CONFLICT');
-                return;
+                throw new PayGoRequestError(localize('vertex_paygo.hook.proxy_conflict'), 'CUSTOM_REVERSE_PROXY_CONFLICT');
             }
 
             const validation = validatePluginState({
@@ -154,15 +151,7 @@ export function createRequestHook({
                 region: generateData.vertexai_region,
             });
             if (!validation.ok) {
-                notifyError(localizeValidation(localize, validation, state));
-                recordClientEvent(logger, 'warn', 'request.blocked', {
-                    ...logContext,
-                    phase: 'blocked',
-                    errorCode: validation.code,
-                    durationMs: Date.now() - startedAt,
-                });
-                logger.error('[Vertex PayGo] Request blocked:', validation.code, validation.message);
-                return;
+                throw new PayGoRequestError(localizeValidation(localize, validation, state), validation.code);
             }
             if (validation.warning) {
                 const warningKey = `${source}:${validation.support?.level ?? 'warning'}:${String(generateData.model ?? '').trim().toLowerCase()}`;
@@ -193,16 +182,23 @@ export function createRequestHook({
             });
             return prepared;
         } catch (error) {
-            notifyError(localize('vertex_paygo.hook.request_blocked', {
-                message: localizeError(localize, error),
-            }));
-            recordClientEvent(logger, 'error', 'request.prepare_failed', {
+            const failure = error instanceof Error ? error : new PayGoRequestError(String(error), undefined, { cause: error });
+            const blocked = failure instanceof PayGoRequestError;
+            // UI and diagnostics must not replace the original failure.
+            try {
+                notifyError(blocked ? failure.message : localize('vertex_paygo.hook.request_blocked', {
+                    message: localizeError(localize, failure),
+                }));
+            } catch { /* Preserve the request error. */ }
+            recordClientEvent(logger, blocked ? 'warn' : 'error', blocked ? 'request.blocked' : 'request.prepare_failed', {
                 ...logContext,
-                phase: 'failed',
+                phase: blocked ? 'blocked' : 'failed',
                 durationMs: Date.now() - startedAt,
-                ...getSafeErrorContext(error),
+                ...getSafeErrorContext(failure),
             });
-            logger.error('[Vertex PayGo] Failed to prepare request; failure sink retained.', error);
+            try { logger.error('[Vertex PayGo] Request blocked before generation.', failure); }
+            catch { /* Preserve the request error. */ }
+            throw failure;
         }
     };
 }
