@@ -118,3 +118,11 @@ test('server errors are localized by protocol code with unknown errors preserved
     assert.equal(localizeError(localize, { code: 'INVALID_LOG_RESPONSE' }), 'Server Plugin returned an invalid log response.');
     assert.equal(localizeError(localize, new Error('opaque upstream failure')), 'opaque upstream failure');
 });
+
+test('HTTP diagnostics localize CSRF and non-JSON failures without rendering error pages', () => {
+    const localize = createLocalizer();
+    assert.match(localizeError(localize, { code: 'CSRF_REJECTED' }), /CSRF token \(HTTP 403\)/u);
+    assert.match(localizeError(localize, { code: 'HTTP_ERROR', status: 502, responseFormat: 'non-json' }), /HTTP 502/u);
+    const error = Object.assign(new Error('Credentials invalid.'), { code: 'HTTP_ERROR', status: 400, serverCode: 'INVALID_CREDENTIALS' });
+    assert.match(localizeError(localize, error), /Credentials invalid.*HTTP 400.*INVALID_CREDENTIALS/u);
+});

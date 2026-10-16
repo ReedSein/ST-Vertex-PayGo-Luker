@@ -238,5 +238,7 @@
   "vertex_paygo.message_cost.placement.guidance": "此設定會全域套用至所有聊天與 API 來源喵。即使把費用藏起來，後台也依然會乖乖記錄用量與費用的喵~",
   "vertex_paygo.message_cost.recent_count": "顯示最近聊天樓層的費用",
   "vertex_paygo.message_cost.recent_count.guidance": "僅在最近 N 層聊天訊息內顯示費用（1–1000，預設 20），使用者和系統訊息也計入樓層數。此設定僅影響價格顯示，歷史用量和費用記錄仍保留。",
-  "vertex_paygo.bridge.status_on_persistent": "橋接已啟用，下次宿主啟動時會自動恢復喵~"
+  "vertex_paygo.bridge.status_on_persistent": "橋接已啟用，下次宿主啟動時會自動恢復喵~",
+  "vertex_paygo.server_error.csrf": "SillyTavern 拒絕了 CSRF 權杖（HTTP 403）。請重新整理頁面後再試。",
+  "vertex_paygo.server_error.http_non_json": "伺服器插件請求失敗（HTTP {status}）；伺服器或反向代理未傳回 JSON 錯誤詳情。"
 }

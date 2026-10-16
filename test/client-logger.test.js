@@ -78,6 +78,12 @@ test('client context mirrors server numeric and identifier boundaries', () => {
         errorCode: 'TIMEOUT',
         statusCode: 504,
     });
+    assert.deepEqual(getSafeErrorContext({ code: 'HTTP_ERROR', serverCode: 'EXPLICIT_SECRET_NOT_FOUND', status: 400 }), {
+        errorCode: 'EXPLICIT_SECRET_NOT_FOUND', statusCode: 400,
+    });
+    assert.deepEqual(getSafeErrorContext({ code: 'HTTP_ERROR', serverCode: 'unsafe?key=secret', status: 400 }), {
+        errorCode: 'HTTP_ERROR', statusCode: 400,
+    });
 });
 
 test('failed client log delivery stays queued and a later flush retries in order', async () => {

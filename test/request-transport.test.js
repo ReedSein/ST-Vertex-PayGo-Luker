@@ -49,7 +49,7 @@ test('chat prepare runs after a late secret override and keeps the event failure
     const payload = data();
     f.hook(payload);
     assert.equal(f.prepared.length, 0);
-    assert.match(payload.reverse_proxy, /\/rejected$/);
+    assert.match(payload.reverse_proxy, /^vertex-paygo-blocked:/);
     const finalBody = { ...structuredClone(payload), secret_id: 'chosen-key' };
     await f.target.fetch(endpoint, { method: 'POST', body: JSON.stringify(finalBody) });
     assert.equal(f.prepared.length, 1);
@@ -91,17 +91,39 @@ test('direct preset requests use that preset and direct payloads default to Stan
     await assert.rejects(f.context.ChatCompletionService.processRequest(data(), { presetName: 'missing' }), /Cannot resolve/);
 });
 
-test('preparation failure and proxy conflicts retain a blocked destination', async () => {
-    const f = setup({ prepare: () => { throw new Error('offline'); } });
+test('preparation failure and proxy conflicts reject before any generation request', async () => {
+    const failure = Object.assign(new Error('Selected Google credential was not found.'), {
+        code: 'HTTP_ERROR', serverCode: 'EXPLICIT_SECRET_NOT_FOUND', status: 400,
+    });
+    const f = setup({ prepare: () => { throw failure; } });
     const payload = data();
     f.hook(payload);
-    await f.target.fetch(endpoint, { method: 'POST', body: JSON.stringify(payload) });
-    assert.match(f.sent[0].data.reverse_proxy, /\/rejected$/);
+    await assert.rejects(f.target.fetch(endpoint, { method: 'POST', body: JSON.stringify(payload) }), error => error === failure);
+    assert.equal(f.sent.length, 0);
     const conflict = { ...data(), reverse_proxy: 'https://custom.example' };
     f.hook(conflict);
-    await f.target.fetch(endpoint, { method: 'POST', body: JSON.stringify(conflict) });
+    await assert.rejects(f.target.fetch(endpoint, { method: 'POST', body: JSON.stringify(conflict) }), {
+        code: 'CUSTOM_REVERSE_PROXY_CONFLICT',
+    });
     assert.equal(f.prepared.length, 1);
-    assert.match(f.sent[1].data.reverse_proxy, /\/rejected$/);
+    assert.equal(f.sent.length, 0);
+});
+
+test('background service, preset and connection profile failures propagate without generating', async () => {
+    const failure = Object.assign(new Error('The selected Google credential was not found.'), {
+        code: 'HTTP_ERROR', serverCode: 'EXPLICIT_SECRET_NOT_FOUND', status: 400,
+    });
+    const f = setup({ prepare: () => { throw failure; },
+        presets: { discounted: { extensions: { 'vertex-paygo': flex } } },
+        profiles: { a: { mode: 'cc', api: 'makersuite', 'vertex-paygo': flex } },
+    });
+    for (const send of [
+        () => f.context.ChatCompletionService.sendRequest(data()),
+        () => f.context.ChatCompletionService.processRequest(data(), { presetName: 'discounted' }),
+        () => f.context.ConnectionManagerRequestService.sendRequest('a', 'fixture', 10),
+    ]) await assert.rejects(send(), error => error === failure);
+    assert.equal(f.prepared.length, 3);
+    assert.equal(f.sent.length, 0);
 });
 
 test('unmarked chat paths also prepare; unrelated fetches remain untouched', async () => {
@@ -118,12 +140,14 @@ test('unmarked chat paths also prepare; unrelated fetches remain untouched', asy
 test('preset-inherited custom proxies are rejected and non-Google preset fallbacks stay native', async () => {
     const f = setup({ presets: { proxy: { extensions: { 'vertex-paygo': flex },
         payload: { reverse_proxy: 'https://custom.example', proxy_password: 'custom' } } } });
-    await f.context.ChatCompletionService.processRequest(data(), { presetName: 'proxy' });
+    await assert.rejects(f.context.ChatCompletionService.processRequest(data(), { presetName: 'proxy' }), {
+        code: 'CUSTOM_REVERSE_PROXY_CONFLICT',
+    });
     assert.equal(f.prepared.length, 0);
-    assert.match(f.sent[0].data.reverse_proxy, /\/rejected$/);
+    assert.equal(f.sent.length, 0);
     await f.context.ChatCompletionService.processRequest({ chat_completion_source: 'custom' }, { presetName: 'missing' });
     assert.equal(f.prepared.length, 0);
-    assert.equal(f.sent[1].data.reverse_proxy, undefined);
+    assert.equal(f.sent[0].data.reverse_proxy, undefined);
 });
 
 test('aborted requests never generate; Request objects preserve headers and abort signal', async () => {

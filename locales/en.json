@@ -238,5 +238,7 @@
   "vertex_paygo.message_cost.placement.guidance": "Applies globally to all chats and API sources. Hiding costs does not stop usage and cost recording.",
   "vertex_paygo.message_cost.recent_count": "Show costs for recent chat messages",
   "vertex_paygo.message_cost.recent_count.guidance": "Only display costs within the latest N chat messages (1–1000, default 20), counting user and system messages too. This only affects price display; historical usage and cost records are retained.",
-  "vertex_paygo.bridge.status_on_persistent": "Bridge enabled. It will restore automatically at the next host startup."
+  "vertex_paygo.bridge.status_on_persistent": "Bridge enabled. It will restore automatically at the next host startup.",
+  "vertex_paygo.server_error.csrf": "SillyTavern rejected the CSRF token (HTTP 403). Refresh the page and try again.",
+  "vertex_paygo.server_error.http_non_json": "Server Plugin request failed (HTTP {status}); the server or reverse proxy returned no JSON error details."
 }
