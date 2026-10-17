@@ -16,6 +16,27 @@ function jsonResponse(data, { ok = true, status = 200 } = {}) {
     return { ok, status, json: async () => data };
 }
 
+test('data backup operations use fresh authentication and validate the response contract', async () => {
+    const requests = [];
+    const report = { ok: true, entries: [{ id: 'snapshot', createdAt: '2026-10-17T00:00:00Z', restorable: true,
+        reason: 'startup', files: ['usage-ledger.jsonl'] }], pending: null, nextCursor: null };
+    const client = createServerClient({ getRequestHeaders: () => ({ 'X-CSRF-Token': 'fixture' }), fetchImpl: async (url, options) => {
+        requests.push({ url, options });
+        return jsonResponse(url.includes('data-backups') ? report : url.endsWith('/cancel') ? { ok: true } : { ok: true, restartRequired: true });
+    } });
+    assert.equal((await client.listDataBackups('previous+id')).entries.length, 1);
+    await client.scheduleDataRestore('snapshot'); await client.cancelDataRestore();
+    assert.match(requests[0].url, /cursor=previous%2Bid/u);
+    assert.deepEqual(JSON.parse(requests[1].options.body), { backupId: 'snapshot' });
+    for (const request of requests) {
+        assert.equal(request.options.headers['X-CSRF-Token'], 'fixture'); assert.equal(request.options.cache, 'no-store');
+    }
+    const invalid = createServerClient({ fetchImpl: async () => jsonResponse({ ok: true }) });
+    for (const action of [() => invalid.listDataBackups(), () => invalid.scheduleDataRestore('snapshot')]) {
+        await assert.rejects(action, { code: 'INVALID_BACKUP_RESPONSE' });
+    }
+});
+
 function textResponse(data, {
     ok = true,
     status = 200,
