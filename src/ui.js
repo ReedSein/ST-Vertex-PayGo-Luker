@@ -17,6 +17,7 @@ import {
 } from './i18n.js';
 import { getModelPolicy, getTierSupport } from './model-policy.js';
 import { downloadLogText, showLogViewer } from './log-actions.js';
+import { createDataBackupControl } from './data-backup-ui.js';
 import {
     attachStateToProfile,
     getActiveProfile,
@@ -195,6 +196,8 @@ export function createPayGoUi({
     }
 
     const controls = buildControls(localize);
+    const dataBackupControl = createDataBackupControl({ context, serverClient, localize, notifyError });
+    controls.root.append(dataBackupControl.root);
     const placementControl = createMessageCostPlacementControl({ localize, getMessageCostPlacement, setMessageCostPlacement,
         getMessageCostRecentCount, setMessageCostRecentCount });
     controls.root.append(placementControl.root);
@@ -894,6 +897,7 @@ export function createPayGoUi({
                 logsAvailable: health.capabilities?.logs === true,
                 updaterAvailable: health.capabilities?.updater === true,
             };
+            dataBackupControl.setAvailable(health.capabilities?.dataBackups === true);
             recordClientEvent('info', 'server.health_ready', {
                 phase: 'ready',
                 serverStatus: 'ready',
@@ -907,6 +911,7 @@ export function createPayGoUi({
                 logsAvailable: false,
                 updaterAvailable: false,
             };
+            dataBackupControl.setAvailable(false);
             recordClientEvent('warn', 'server.health_unavailable', {
                 phase: 'failed',
                 serverStatus: 'unavailable',
@@ -1157,6 +1162,7 @@ export function createPayGoUi({
             finishUpdatePoll?.();
             finishUpdatePoll = null;
             placementControl.destroy();
+            dataBackupControl.destroy();
             controls.root.remove();
         },
         getState: () => ({ ...state }),
